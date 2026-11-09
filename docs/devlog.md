@@ -81,3 +81,17 @@
 3. **结果如何？**
    - `CategoryFeatureTest` 扩展至 11 项单元测试（涵盖自定义分类、已有分类合并、按类别分组展示 `groupByCategory`、按分类聚合排序、ViewModel 分组模式切换、超长分类拦截、空分类归一化及数据库迁移 SQL），全工程 65 项单元测试全部通过。
 
+---
+
+## [2026-11-09] 阶段 6 (Issue #6)：重构过期日期选择器为 [年 / 月 / 日] 三列联动选择组件
+
+1. **遇到了什么问题？**
+   - 用户反馈：在新增/编辑商品选择过期日期时，使用 Material 3 默认 `DatePicker` 点击顶部的年月（例如 `2026-11`）后，系统只弹出纯年份列表（而没有同时展示月、日选择），交互不符合直觉，期望直接出现 **“年”、“月”、“日”三列联动选择**。
+2. **采取了什么技术方案？**
+   - 设计并实现纯状态模型 [`YearMonthDayPickerModel`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/YearMonthDayPickerDialog.kt#L38-L133) 与三列并排滚动选择组件 [`YearMonthDayPickerDialog`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/YearMonthDayPickerDialog.kt#L140-L315)：
+     - 界面直接并排呈现 **“年”**、**“月”**、**“日”** 三列可滚动选择列表，打开时各列自动滚动并居中高亮当前已选年、月、日；同时顶部提供 `今天`、`+7天`、`+30天`、`+1年` 快捷保质期预设芯片。
+     - 通过 `YearMonth.of(year, month).lengthOfMonth()` 实时计算当前选中年月的最大合法天数（28 / 29 / 30 / 31 天），并在切换年份或月份时自动对 `selectedDay` 执行安全钳制（例如从 `2026-01-31` 切换到 `2月` 自动变为 `28日`，从闰年 `2024-02-29` 切换到平年 `2026年` 自动变为 `28日`），杜绝越界异常。
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 的 `AddEditItemDialog` 中移除原生 `DatePickerDialog`，替换为 [`YearMonthDayPickerDialog`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/YearMonthDayPickerDialog.kt#L140-L315)。
+3. **结果如何？**
+   - 新增 [`YearMonthDayPickerModelTest`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/YearMonthDayPickerModelTest.kt)（6 项单元测试，覆盖三列初始化、年月日联动修改、越界输入安全钳制、大小月切换及平年/闰年 2 月 29 日边界条件），全工程 71 项单元测试全部通过，Debug APK 构建通过。
+

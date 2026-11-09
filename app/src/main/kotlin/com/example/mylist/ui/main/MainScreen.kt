@@ -27,8 +27,6 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,7 +47,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
-import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -73,9 +70,7 @@ import com.example.mylist.domain.query.SortOption
 import com.example.mylist.domain.query.StatusFilter
 import com.example.mylist.domain.query.SummaryStats
 import com.example.mylist.ui.theme.MyListTheme
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 
 /**
@@ -1086,25 +1081,36 @@ fun AddEditItemDialog(
           modifier = Modifier.fillMaxWidth()
         )
 
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
+        Surface(
+          onClick = { showDatePicker = true },
+          shape = RoundedCornerShape(10.dp),
+          color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+          modifier = Modifier.fillMaxWidth()
         ) {
-          Column {
-            Text(
-              text = "过期日期 *",
-              style = MaterialTheme.typography.labelMedium,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-              text = formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
-              style = MaterialTheme.typography.titleMedium,
-              fontWeight = FontWeight.SemiBold
-            )
-          }
-          FilledTonalButton(onClick = { showDatePicker = true }) {
-            Text("选择日期")
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text(
+                text = "过期日期 (年 / 月 / 日) *",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+              )
+              Text(
+                text = "${formState.expirationDate.year}年${formState.expirationDate.monthValue}月${formState.expirationDate.dayOfMonth}日 (${
+                  formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                })",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold
+              )
+            }
+            FilledTonalButton(onClick = { showDatePicker = true }) {
+              Text("选择日期")
+            }
           }
         }
       }
@@ -1122,37 +1128,14 @@ fun AddEditItemDialog(
   )
 
   if (showDatePicker) {
-    val initialMillis = formState.expirationDate
-      .atStartOfDay(ZoneOffset.UTC)
-      .toInstant()
-      .toEpochMilli()
-    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
-
-    DatePickerDialog(
+    YearMonthDayPickerDialog(
+      initialDate = formState.expirationDate,
       onDismissRequest = { showDatePicker = false },
-      confirmButton = {
-        TextButton(
-          onClick = {
-            datePickerState.selectedDateMillis?.let { millis ->
-              val selectedDate = Instant.ofEpochMilli(millis)
-                .atZone(ZoneOffset.UTC)
-                .toLocalDate()
-              onFormChange(formState.copy(expirationDate = selectedDate, errorMessage = null))
-            }
-            showDatePicker = false
-          }
-        ) {
-          Text("确定")
-        }
-      },
-      dismissButton = {
-        TextButton(onClick = { showDatePicker = false }) {
-          Text("取消")
-        }
+      onDateSelected = { selectedDate ->
+        onFormChange(formState.copy(expirationDate = selectedDate, errorMessage = null))
+        showDatePicker = false
       }
-    ) {
-      DatePicker(state = datePickerState)
-    }
+    )
   }
 }
 
