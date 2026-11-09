@@ -1,105 +1,961 @@
 package com.example.mylist.ui.main
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation3.runtime.NavKey
-import com.example.mylist.R
-import com.example.mylist.data.DefaultDataRepository
+import com.example.mylist.domain.model.ExpirationStatus
+import com.example.mylist.domain.model.PurchasedItem
+import com.example.mylist.domain.query.ItemQueryEngine
+import com.example.mylist.domain.query.SortOption
+import com.example.mylist.domain.query.StatusFilter
+import com.example.mylist.domain.query.SummaryStats
 import com.example.mylist.ui.theme.MyListTheme
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 
+/**
+ * 已购商品主屏幕（连接 [PurchasedItemViewModel] 状态流）。
+ */
 @Composable
 fun MainScreen(
-  onItemClick: (NavKey) -> Unit,
-  modifier: Modifier = Modifier,
-  viewModel: MainScreenViewModel = viewModel { MainScreenViewModel(DefaultDataRepository()) },
+  viewModel: PurchasedItemViewModel,
+  modifier: Modifier = Modifier
 ) {
   val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-  when (val state = uiState) {
-    MainScreenUiState.Loading -> {
-      Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center
-      ) {
-        CircularProgressIndicator()
+  val snackbarHostState = remember { SnackbarHostState() }
+  var activeFormState by remember { mutableStateOf<ItemFormState?>(null) }
+
+  // 监听待撤销删除商品，弹出底部 Snackbar 支持一键 Undo
+  LaunchedEffect(uiState.pendingUndoItem) {
+    val deletedItem = uiState.pendingUndoItem ?: return@LaunchedEffect
+    val result = snackbarHostState.showSnackbar(
+      message = "已删除「${deletedItem.name}」",
+      actionLabel = "撤销",
+      duration = SnackbarDuration.Short
+    )
+    if (result == SnackbarResult.ActionPerformed) {
+      viewModel.undoDelete()
+    } else {
+      viewModel.dismissUndo()
+    }
+  }
+
+  MainScreenContent(
+    uiState = uiState,
+    snackbarHostState = snackbarHostState,
+    onSearchQueryChange = viewModel::updateSearchQuery,
+    onStatusFilterChange = viewModel::updateStatusFilter,
+    onSortOptionChange = viewModel::updateSortOption,
+    onAddClick = {
+      activeFormState = ItemFormState.forNewItem()
+    },
+    onEditItem = { item ->
+      activeFormState = ItemFormState.fromExistingItem(item)
+    },
+    onDeleteItem = viewModel::deleteItem,
+    onIncrementQuantity = viewModel::incrementQuantity,
+    onDecrementQuantity = viewModel::decrementQuantity,
+    modifier = modifier
+  )
+
+  activeFormState?.let { currentForm ->
+    AddEditItemDialog(
+      formState = currentForm,
+      onFormChange = { activeFormState = it },
+      onDismiss = {
+        viewModel.clearError()
+        activeFormState = null
+      },
+      onConfirm = {
+        val validated = currentForm.validate()
+        if (validated.errorMessage != null) {
+          activeFormState = validated
+        } else {
+          val success = if (currentForm.isEditMode) {
+            viewModel.updateItem(
+              id = currentForm.editingItemId!!,
+              rawName = currentForm.name,
+              rawQuantity = currentForm.quantity,
+              rawAmount = currentForm.amount,
+              expirationDate = currentForm.expirationDate,
+              createdAtEpochMillis = currentForm.createdAtEpochMillis ?: System.currentTimeMillis()
+            )
+          } else {
+            viewModel.addItem(
+              rawName = currentForm.name,
+              rawQuantity = currentForm.quantity,
+              rawAmount = currentForm.amount,
+              expirationDate = currentForm.expirationDate
+            )
+          }
+          if (success) {
+            activeFormState = null
+          }
+        }
       }
-    }
-    is MainScreenUiState.Success -> {
-      MainScreen(data = state.data, modifier = modifier)
-    }
-    is MainScreenUiState.Error -> {
-      Text("Error loading data: ${state.throwable.message}")
-    }
+    )
   }
 }
 
+/**
+ * 纯状态渲染的主界面内容组件，使用 [BoxWithConstraints] 实现响应式屏幕自适应布局。
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun MainScreen(data: List<String>, modifier: Modifier = Modifier) {
+fun MainScreenContent(
+  uiState: PurchasedItemUiState,
+  snackbarHostState: SnackbarHostState,
+  onSearchQueryChange: (String) -> Unit,
+  onStatusFilterChange: (StatusFilter) -> Unit,
+  onSortOptionChange: (SortOption) -> Unit,
+  onAddClick: () -> Unit,
+  onEditItem: (PurchasedItem) -> Unit,
+  onDeleteItem: (PurchasedItem) -> Unit,
+  onIncrementQuantity: (PurchasedItem) -> Unit,
+  onDecrementQuantity: (PurchasedItem) -> Unit,
+  modifier: Modifier = Modifier,
+  today: LocalDate = LocalDate.now()
+) {
+  var sortMenuExpanded by remember { mutableStateOf(false) }
+
   Scaffold(
-    modifier = modifier,
+    modifier = modifier.fillMaxSize(),
+    snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     topBar = {
-      CenterAlignedTopAppBar(
-        title = { Text(stringResource(R.string.app_name)) },
+      TopAppBar(
+        title = {
+          Column {
+            Text(
+              text = "我的已购商品清单",
+              style = MaterialTheme.typography.titleLarge,
+              fontWeight = FontWeight.Bold
+            )
+            Text(
+              text = uiState.sortOption.displayName,
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+            )
+          }
+        },
+        actions = {
+          Box {
+            TextButton(onClick = { sortMenuExpanded = true }) {
+              Text(
+                text = "排序 ▾",
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                fontWeight = FontWeight.SemiBold
+              )
+            }
+            DropdownMenu(
+              expanded = sortMenuExpanded,
+              onDismissRequest = { sortMenuExpanded = false }
+            ) {
+              SortOption.entries.forEach { option ->
+                DropdownMenuItem(
+                  text = {
+                    Text(
+                      text = if (option == uiState.sortOption) "✓ ${option.displayName}" else option.displayName,
+                      fontWeight = if (option == uiState.sortOption) FontWeight.Bold else FontWeight.Normal
+                    )
+                  },
+                  onClick = {
+                    onSortOptionChange(option)
+                    sortMenuExpanded = false
+                  }
+                )
+              }
+            }
+          }
+        },
         colors = TopAppBarDefaults.topAppBarColors(
           containerColor = MaterialTheme.colorScheme.primaryContainer,
-          titleContentColor = MaterialTheme.colorScheme.primary
+          titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
         )
       )
+    },
+    floatingActionButton = {
+      FloatingActionButton(
+        onClick = onAddClick,
+        containerColor = MaterialTheme.colorScheme.primary,
+        contentColor = MaterialTheme.colorScheme.onPrimary
+      ) {
+        Text(
+          text = "＋ 新增",
+          modifier = Modifier.padding(horizontal = 16.dp),
+          style = MaterialTheme.typography.labelLarge,
+          fontWeight = FontWeight.Bold
+        )
+      }
     }
   ) { innerPadding ->
-
-    // App Content
-
-    Column(
-      modifier = Modifier.padding(innerPadding),
-      verticalArrangement = Arrangement.spacedBy(8.dp)
+    BoxWithConstraints(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(innerPadding)
     ) {
-      data.forEach { Greeting(it) }
-      Button(
-        modifier = Modifier.padding(24.dp, 24.dp),
-        onClick = { /* Button clicked */ }
+      val layoutConfig = AdaptiveLayoutConfig.fromScreenWidthDp(maxWidth.value.toInt())
+      val horizontalPadding = layoutConfig.horizontalPaddingDp.dp
+      val spacing = layoutConfig.cardSpacingDp.dp
+
+      LazyVerticalGrid(
+        columns = GridCells.Fixed(layoutConfig.gridColumns),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+          start = horizontalPadding,
+          end = horizontalPadding,
+          top = 12.dp,
+          bottom = 96.dp
+        ),
+        horizontalArrangement = Arrangement.spacedBy(spacing),
+        verticalArrangement = Arrangement.spacedBy(spacing)
       ) {
-        Text("OK")
+        // 1. 顶部统计概览卡片（跨全部列）
+        item(span = { GridItemSpan(maxLineSpan) }) {
+          SummaryDashboardCard(
+            stats = uiState.summaryStats,
+            isWideScreen = layoutConfig.category != ScreenSizeCategory.COMPACT
+          )
+        }
+
+        // 2. 搜索栏与状态快捷筛选（跨全部列）
+        item(span = { GridItemSpan(maxLineSpan) }) {
+          SearchAndFilterSection(
+            searchQuery = uiState.searchQuery,
+            selectedFilter = uiState.statusFilter,
+            summaryStats = uiState.summaryStats,
+            onSearchQueryChange = onSearchQueryChange,
+            onStatusFilterChange = onStatusFilterChange
+          )
+        }
+
+        // 3. 商品列表或空状态提示
+        if (uiState.items.isEmpty()) {
+          item(span = { GridItemSpan(maxLineSpan) }) {
+            EmptyStateCard(
+              hasAnyItemsInDb = uiState.allItemsCount > 0,
+              onAddClick = onAddClick,
+              onResetFilters = {
+                onSearchQueryChange("")
+                onStatusFilterChange(StatusFilter.ALL)
+              }
+            )
+          }
+        } else {
+          items(
+            items = uiState.items,
+            key = { it.id }
+          ) { item ->
+            PurchasedItemCard(
+              item = item,
+              today = today,
+              onIncrement = { onIncrementQuantity(item) },
+              onDecrement = { onDecrementQuantity(item) },
+              onEdit = { onEditItem(item) },
+              onDelete = { onDeleteItem(item) }
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 顶部统计概览卡片：展示商品总数、临期数、已过期数、以及已填写金额总计。
+ */
+@Composable
+fun SummaryDashboardCard(
+  stats: SummaryStats,
+  isWideScreen: Boolean,
+  modifier: Modifier = Modifier
+) {
+  Card(
+    modifier = modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.65f)
+    )
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "库存与花费概览",
+          style = MaterialTheme.typography.titleSmall,
+          fontWeight = FontWeight.Bold,
+          color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+        Text(
+          text = "共 ${stats.totalItemCount} 项 (${stats.totalQuantityCount} 件)",
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
       }
 
-      // TODO: Extend app UI with more Jetpack Compose UI elements here
-
+      if (isWideScreen) {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+          SummaryMetricItem(
+            label = "商品总件数",
+            value = "${stats.totalQuantityCount}",
+            valueColor = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1f)
+          )
+          SummaryMetricItem(
+            label = "7天内临期",
+            value = "${stats.expiringSoonCount}",
+            valueColor = Color(0xFFE65100),
+            modifier = Modifier.weight(1f)
+          )
+          SummaryMetricItem(
+            label = "已过期",
+            value = "${stats.expiredCount}",
+            valueColor = Color(0xFFC62828),
+            modifier = Modifier.weight(1f)
+          )
+          SummaryMetricItem(
+            label = "记录总金额",
+            value = stats.formattedTotalSpent(),
+            valueColor = MaterialTheme.colorScheme.tertiary,
+            modifier = Modifier.weight(1f)
+          )
+        }
+      } else {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          SummaryMetricItem(
+            label = "7天内临期",
+            value = "${stats.expiringSoonCount} 项",
+            valueColor = Color(0xFFE65100),
+            modifier = Modifier.weight(1f)
+          )
+          SummaryMetricItem(
+            label = "已过期",
+            value = "${stats.expiredCount} 项",
+            valueColor = Color(0xFFC62828),
+            modifier = Modifier.weight(1f)
+          )
+          SummaryMetricItem(
+            label = "记录总金额",
+            value = stats.formattedTotalSpent(),
+            valueColor = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.weight(1.2f)
+          )
+        }
+      }
     }
   }
 }
 
 @Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-  Text(
-    text = "Hello $name !",
-    modifier = modifier.padding(16.dp, 16.dp),
-    style = MaterialTheme.typography.bodyLarge
-  )
+private fun SummaryMetricItem(
+  label: String,
+  value: String,
+  valueColor: Color,
+  modifier: Modifier = Modifier
+) {
+  Surface(
+    modifier = modifier,
+    shape = RoundedCornerShape(12.dp),
+    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f)
+  ) {
+    Column(
+      modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+      horizontalAlignment = Alignment.Start
+    ) {
+      Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+      Spacer(modifier = Modifier.height(2.dp))
+      Text(
+        text = value,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = valueColor,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+    }
+  }
 }
 
-@Preview(showBackground = true, showSystemUi = true)
+/**
+ * 搜索输入框与状态过滤标签栏。
+ */
 @Composable
-fun MainScreenPreview() {
-  MyListTheme { MainScreen(listOf("Android")) }
+fun SearchAndFilterSection(
+  searchQuery: String,
+  selectedFilter: StatusFilter,
+  summaryStats: SummaryStats,
+  onSearchQueryChange: (String) -> Unit,
+  onStatusFilterChange: (StatusFilter) -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Column(
+    modifier = modifier.fillMaxWidth(),
+    verticalArrangement = Arrangement.spacedBy(8.dp)
+  ) {
+    OutlinedTextField(
+      value = searchQuery,
+      onValueChange = onSearchQueryChange,
+      modifier = Modifier.fillMaxWidth(),
+      singleLine = true,
+      shape = RoundedCornerShape(12.dp),
+      label = { Text("搜索已购商品名称") },
+      placeholder = { Text("输入关键字过滤...") },
+      trailingIcon = {
+        if (searchQuery.isNotEmpty()) {
+          TextButton(onClick = { onSearchQueryChange("") }) {
+            Text("清空")
+          }
+        }
+      }
+    )
+
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+      StatusFilter.entries.forEach { filter ->
+        val count = when (filter) {
+          StatusFilter.ALL -> summaryStats.totalItemCount
+          StatusFilter.EXPIRING_SOON -> summaryStats.expiringSoonCount
+          StatusFilter.EXPIRED -> summaryStats.expiredCount
+          StatusFilter.NORMAL -> summaryStats.normalCount
+        }
+        val selected = filter == selectedFilter
+        FilterChip(
+          selected = selected,
+          onClick = { onStatusFilterChange(filter) },
+          label = {
+            Text(
+              text = "${filter.displayName} ($count)",
+              fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            )
+          },
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+          )
+        )
+      }
+    }
+  }
 }
 
+/**
+ * 单个已购商品卡片组件：包含视觉高亮过期状态标签、快捷 +/- 数量按钮、可选金额展示、编辑与删除操作。
+ */
+@Composable
+fun PurchasedItemCard(
+  item: PurchasedItem,
+  today: LocalDate,
+  onIncrement: () -> Unit,
+  onDecrement: () -> Unit,
+  onEdit: () -> Unit,
+  onDelete: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val expInfo = item.expirationInfo(today)
+  val (badgeBgColor, badgeTextColor, cardBorderColor) = when (expInfo.status) {
+    ExpirationStatus.EXPIRED -> Triple(
+      Color(0xFFFFEBEE),
+      Color(0xFFC62828),
+      Color(0xFFEF9A9A)
+    )
+    ExpirationStatus.EXPIRING_SOON -> Triple(
+      Color(0xFFFFF3E0),
+      Color(0xFFE65100),
+      Color(0xFFFFCC80)
+    )
+    ExpirationStatus.NORMAL -> Triple(
+      Color(0xFFE8F5E9),
+      Color(0xFF2E7D32),
+      MaterialTheme.colorScheme.outlineVariant
+    )
+  }
+
+  Card(
+    modifier = modifier.fillMaxWidth(),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.surface
+    ),
+    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(16.dp),
+      verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+      // 第一行：商品名称 + 临期/过期视觉状态高亮标签
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = item.name,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Surface(
+          color = badgeBgColor,
+          shape = RoundedCornerShape(999.dp)
+        ) {
+          Text(
+            text = expInfo.label,
+            color = badgeTextColor,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+          )
+        }
+      }
+
+      // 第二行：过期日期与金额（选填）
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "过期日期：${item.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)}",
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+          text = item.formattedAmount()?.let { "金额：$it" } ?: "未填金额",
+          style = MaterialTheme.typography.bodyMedium,
+          fontWeight = if (item.amount != null) FontWeight.SemiBold else FontWeight.Normal,
+          color = if (item.amount != null) {
+            MaterialTheme.colorScheme.primary
+          } else {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+          }
+        )
+      }
+
+      // 第三行：左侧快捷 +/- 调整纯整数数量，右侧编辑 / 删除按钮
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Text(
+            text = "数量：",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+          Surface(
+            onClick = onDecrement,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.size(32.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Text(
+                text = "−",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSecondaryContainer
+              )
+            }
+          }
+          Text(
+            text = "${item.quantity}",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 6.dp)
+          )
+          Surface(
+            onClick = onIncrement,
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer,
+            modifier = Modifier.size(32.dp)
+          ) {
+            Box(contentAlignment = Alignment.Center) {
+              Text(
+                text = "＋",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onPrimaryContainer
+              )
+            }
+          }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+          TextButton(onClick = onEdit) {
+            Text("编辑")
+          }
+          TextButton(onClick = onDelete) {
+            Text(
+              text = "删除",
+              color = MaterialTheme.colorScheme.error
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 列表为空时的引导卡片。
+ */
+@Composable
+fun EmptyStateCard(
+  hasAnyItemsInDb: Boolean,
+  onAddClick: () -> Unit,
+  onResetFilters: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .padding(vertical = 24.dp),
+    shape = RoundedCornerShape(16.dp),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+    )
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(24.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+      Text(
+        text = if (hasAnyItemsInDb) "没有找到匹配的已购商品" else "还没有记录任何已购商品",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold
+      )
+      Text(
+        text = if (hasAnyItemsInDb) {
+          "可以尝试清空搜索词或切换状态筛选标签"
+        } else {
+          "点击右下角「＋ 新增」按钮，开始管理商品的数量、金额与过期日期"
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+      if (hasAnyItemsInDb) {
+        OutlinedButton(onClick = onResetFilters) {
+          Text("重置搜索与筛选")
+        }
+      } else {
+        Button(onClick = onAddClick) {
+          Text("＋ 立即添加第一件商品")
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 新增 / 编辑商品表单弹窗（内置 Material 3 [DatePickerDialog] 选择过期日期）。
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AddEditItemDialog(
+  formState: ItemFormState,
+  onFormChange: (ItemFormState) -> Unit,
+  onDismiss: () -> Unit,
+  onConfirm: () -> Unit
+) {
+  var showDatePicker by remember { mutableStateOf(false) }
+
+  AlertDialog(
+    onDismissRequest = onDismiss,
+    title = {
+      Text(
+        text = if (formState.isEditMode) "编辑已购商品" else "新增已购商品",
+        fontWeight = FontWeight.Bold
+      )
+    },
+    text = {
+      Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+      ) {
+        if (formState.errorMessage != null) {
+          Surface(
+            color = MaterialTheme.colorScheme.errorContainer,
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier.fillMaxWidth()
+          ) {
+            Text(
+              text = formState.errorMessage,
+              color = MaterialTheme.colorScheme.onErrorContainer,
+              style = MaterialTheme.typography.bodySmall,
+              modifier = Modifier.padding(10.dp)
+            )
+          }
+        }
+
+        OutlinedTextField(
+          value = formState.name,
+          onValueChange = { onFormChange(formState.copy(name = it, errorMessage = null)) },
+          label = { Text("商品名称 *") },
+          placeholder = { Text("例如：鲜牛奶、全麦面包") },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+          value = formState.quantity,
+          onValueChange = { onFormChange(formState.copy(quantity = it, errorMessage = null)) },
+          label = { Text("商品数量 (正整数) *") },
+          placeholder = { Text("例如：1") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedTextField(
+          value = formState.amount,
+          onValueChange = { onFormChange(formState.copy(amount = it, errorMessage = null)) },
+          label = { Text("购买金额 (选填，可不填)") },
+          placeholder = { Text("例如：19.90，留空表示不填") },
+          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Column {
+            Text(
+              text = "过期日期 *",
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+              text = formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE),
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.SemiBold
+            )
+          }
+          FilledTonalButton(onClick = { showDatePicker = true }) {
+            Text("选择日期")
+          }
+        }
+      }
+    },
+    confirmButton = {
+      Button(onClick = onConfirm) {
+        Text(if (formState.isEditMode) "保存修改" else "确认添加")
+      }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) {
+        Text("取消")
+      }
+    }
+  )
+
+  if (showDatePicker) {
+    val initialMillis = formState.expirationDate
+      .atStartOfDay(ZoneOffset.UTC)
+      .toInstant()
+      .toEpochMilli()
+    val datePickerState = rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+
+    DatePickerDialog(
+      onDismissRequest = { showDatePicker = false },
+      confirmButton = {
+        TextButton(
+          onClick = {
+            datePickerState.selectedDateMillis?.let { millis ->
+              val selectedDate = Instant.ofEpochMilli(millis)
+                .atZone(ZoneOffset.UTC)
+                .toLocalDate()
+              onFormChange(formState.copy(expirationDate = selectedDate, errorMessage = null))
+            }
+            showDatePicker = false
+          }
+        ) {
+          Text("确定")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showDatePicker = false }) {
+          Text("取消")
+        }
+      }
+    ) {
+      DatePicker(state = datePickerState)
+    }
+  }
+}
+
+// ==================== Compose Previews ====================
+
+private val previewToday = LocalDate.of(2026, 11, 9)
+private val previewItems = listOf(
+  PurchasedItem(
+    id = 1L,
+    name = "希腊酸奶",
+    quantity = 2,
+    amount = 18.50,
+    expirationDate = previewToday.minusDays(1)
+  ),
+  PurchasedItem(
+    id = 2L,
+    name = "有机纯牛奶",
+    quantity = 1,
+    amount = 29.90,
+    expirationDate = previewToday.plusDays(3)
+  ),
+  PurchasedItem(
+    id = 3L,
+    name = "苏打矿泉水",
+    quantity = 6,
+    amount = null,
+    expirationDate = previewToday.plusDays(30)
+  )
+)
+
+@Preview(name = "Phone Portrait (Compact)", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+fun MainScreenPhonePreview() {
+  MyListTheme {
+    MainScreenContent(
+      uiState = PurchasedItemUiState(
+        items = previewItems,
+        allItemsCount = previewItems.size,
+        summaryStats = ItemQueryEngine.computeSummaryStats(previewItems, previewToday)
+      ),
+      snackbarHostState = remember { SnackbarHostState() },
+      onSearchQueryChange = {},
+      onStatusFilterChange = {},
+      onSortOptionChange = {},
+      onAddClick = {},
+      onEditItem = {},
+      onDeleteItem = {},
+      onIncrementQuantity = {},
+      onDecrementQuantity = {},
+      today = previewToday
+    )
+  }
+}
+
+@Preview(name = "Tablet Adaptive (Medium 2-Col)", showBackground = true, widthDp = 720, heightDp = 1024)
+@Composable
+fun MainScreenTabletPreview() {
+  MyListTheme {
+    MainScreenContent(
+      uiState = PurchasedItemUiState(
+        items = previewItems,
+        allItemsCount = previewItems.size,
+        summaryStats = ItemQueryEngine.computeSummaryStats(previewItems, previewToday)
+      ),
+      snackbarHostState = remember { SnackbarHostState() },
+      onSearchQueryChange = {},
+      onStatusFilterChange = {},
+      onSortOptionChange = {},
+      onAddClick = {},
+      onEditItem = {},
+      onDeleteItem = {},
+      onIncrementQuantity = {},
+      onDecrementQuantity = {},
+      today = previewToday
+    )
+  }
+}

@@ -210,3 +210,4 @@ class AppDatabase private constructor(
     }
   }
 }
+

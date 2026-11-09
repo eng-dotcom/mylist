@@ -36,3 +36,4 @@ interface PurchasedItemDao {
    */
   suspend fun deleteItemById(id: Long): Int
 }
+

@@ -56,3 +56,15 @@
 3. **结果如何？**
    - 新增 12 项针对 `ItemQueryEngine` 与 `PurchasedItemViewModel` 的单元测试全部通过，全工程累计 46 项单元测试 100% 通过。
 
+---
+
+## [2026-11-09] 阶段 4 (Issue #4)：Jetpack Compose 响应式 UI 实现（自适应屏幕大小）与交互集成
+
+1. **遇到了什么问题？**
+   - 需要满足“自适应屏幕大小”要求，同时在 Compose BOM `2026.03.01`（Material 3 1.4+）中不再默认传递 `material-icons-core` 依赖；此外需要保证新增/编辑商品弹窗中的可选金额在未填写、填写小数、编辑回填时的体验流畅且可独立执行单元测试。
+2. **采取了什么技术方案？**
+   - 抽离纯函数与状态类 [`AdaptiveLayoutConfig`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt) 与 [`ItemFormState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt)，通过 `BoxWithConstraints` 获取实时屏幕宽度，在 `< 600dp`（手机单列）、`600..839dp`（小平板/折叠屏双列）、`>= 840dp`（大平板三列）之间自适应切换 `LazyVerticalGrid` 列数、边距与顶部统计概览卡片布局。
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 中实现顶部统计概览卡片（[`SummaryDashboardCard`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L291-L391)）、搜索与状态筛选标签栏（[`SearchAndFilterSection`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L430-L497)）、带过期/临期视觉颜色标签与快捷 `+/-` 按钮的商品卡片（[`PurchasedItemCard`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L502-L654)）、内置 Material 3 `DatePickerDialog` 的新增/编辑弹窗（[`AddEditItemDialog`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L708-L855)）以及底部 Snackbar 撤销（Undo）交互。
+3. **结果如何？**
+   - 新增 7 项针对自适应断点计算与表单状态回填/校验的单元测试，全工程累计 54 项单元测试全部通过，且 Debug APK 编译打包（`assembleDebug`）一次成功。
+
