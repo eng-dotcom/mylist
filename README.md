@@ -110,4 +110,5 @@ erDiagram
 | `extractAvailableCategories(items, presetCategories)` | `items: List<PurchasedItem>`, `presetCategories: List<String>` | 提取并合并去重已有商品分类与预设常用分类列表 |
 | `groupByCategory(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 将商品按类别（Category）分组聚合，计算各分类商品项数、总件数、临期数与过期数，并将 `"未分类"` 置于末尾 |
 | `computeSummaryStats(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 计算顶部统计卡片数据：总条目数、商品总件数、临期数、已过期数、已填金额总计 |
+| `YearMonthDayPickerModel.fromLocalDate(initialDate)` | `initialDate: LocalDate`, `minYear: Int`, `maxYear: Int` | 生成 **“年”、“月”、“日”三列联动日期选择器** 状态，支持 `selectYear` / `selectMonth` / `selectDay` 及大小月与闰年2月天数自动钳制 |
 
