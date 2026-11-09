@@ -8,11 +8,11 @@ MyList 是一款基于 **Kotlin + Jetpack Compose + Room** 开发的轻量级 An
 
 ### 环境要求
 - **操作系统**：Windows 10/11 (终端使用 PowerShell 5.1/7+)
-- **JDK 版本**：JDK 17 或更高版本
+- **JDK 版本**：JDK 21（已在 `gradle.properties` 配置本地便携版路径 `C:/Users/regal/.jdks/jdk-21.0.13.0.2+1`）
 - **Android SDK**：
-  - `compileSdk`：35 (或 34)
-  - `minSdk`：26 (Android 8.0，支持 `java.time.LocalDate`)
-  - `targetSdk`：35 (或 34)
+  - `compileSdk`：36
+  - `minSdk`：26 (Android 8.0，原生支持 `java.time.LocalDate`)
+  - `targetSdk`：36
 - **构建工具**：Gradle Wrapper (`.\gradlew.bat`) / Android CLI (`android`)
 
 ### 构建与运行步骤（PowerShell）
@@ -106,3 +106,4 @@ erDiagram
 | `computeExpirationStatus(expirationDate, today)` | `expirationDate: LocalDate`, `today: LocalDate` | 计算商品状态：`EXPIRED` (<0天)、`EXPIRING_SOON` (0~7天)、`NORMAL` (>7天) 及相差天数 |
 | `filterAndSortItems(items, query, statusFilter, sortOption, today)` | 列表、搜索词、状态过滤枚举、排序枚举、当前日期 | 执行大小写不敏感的名称搜索、状态过滤（全部/临期/已过期/正常）及多维排序 |
 | `computeSummaryStats(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 计算顶部统计卡片数据：总条目数、商品总件数、临期数、已过期数、已填金额总计 |
+
