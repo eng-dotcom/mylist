@@ -28,3 +28,17 @@
 3. **结果如何？**
    - 完整覆盖了正常/临期/已过期状态计算、临界天数（-1/0/7/8天）、可选金额（不填/0/两位小数/超两位小数拦截）及纯正整数数量校验，所有单元测试通过。
 
+---
+
+## [2026-11-09] 阶段 2 (Issue #2)：数据库持久化、Repository 仓库层与增删改及快捷加减数量逻辑
+
+1. **遇到了什么问题？**
+   - 项目使用 Kotlin `2.3.20` 与 AGP `9.0.1`，若引入需要 KSP/KAPT 注解处理器的重型 ORM 编译插件，容易出现 Kotlin 2.3.20 编译器插件版本不匹配且增加不必要的构建耗时；同时需要保证 JVM 单元测试能脱离 Android 设备高速执行。
+2. **采取了什么技术方案？**
+   - 采用清晰的 `PurchasedItemDao` 接口抽象，提供两套实现：
+     1. 生产环境使用基于 Android 原生 `SQLiteOpenHelper` + `MutableStateFlow` 响应式流封装的 [`AppDatabase`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/data/local/AppDatabase.kt)（管理 `purchased_items` 表，支持 `CONFLICT_REPLACE` 原 ID 恢复与响应式监听）。
+     2. 单元测试与 Compose Preview 使用协程安全的 [`InMemoryPurchasedItemDao`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/data/local/InMemoryPurchasedItemDao.kt)。
+   - 实现 [`DefaultPurchasedItemRepository`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/data/repository/PurchasedItemRepository.kt)，内置字段二次校验、`adjustQuantity` 快捷数量加减（数量为 `1` 时拦截 `-1` 防止出现 `<= 0` 的非法数量）以及 `lastDeletedItem` 缓存以支持误删 Undo 恢复。
+3. **结果如何？**
+   - 零外部注解处理器冲突，新增 13 项针对实体映射、表结构 DDL 与仓库层正/异/边界路径的单元测试全部秒级通过。
+
