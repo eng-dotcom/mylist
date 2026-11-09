@@ -42,3 +42,17 @@
 3. **结果如何？**
    - 零外部注解处理器冲突，新增 13 项针对实体映射、表结构 DDL 与仓库层正/异/边界路径的单元测试全部秒级通过。
 
+---
+
+## [2026-11-09] 阶段 3 (Issue #3)：搜索、状态筛选、多维排序与顶部统计概览计算逻辑（ViewModel 层）
+
+1. **遇到了什么问题？**
+   - 需要支持搜索关键字、4 种状态筛选（全部/临期/已过期/正常）与 7 种排序方式（过期日期升/降序、添加时间升/降序、金额升/降序、名称排序）任意组合，且金额为可选字段（`null`），在按金额升序或降序时若直接比较会导致 `null` 排在最前干扰有效金额排序；同时统计卡片中的总金额使用 `Double` 直接累加容易产生二进制浮点数精度误差（如 `78.20000000000002`）。
+2. **采取了什么技术方案？**
+   - 实现纯函数查询与统计引擎 [`ItemQueryEngine`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/query/ItemQueryEngine.kt)：
+     - 为金额升序和降序编写自定义 `Comparator`，确保 `amount == null`（未填写金额）的商品在升序和降序中始终排在已填写金额的商品之后，并以 `id` 作为二级稳定排序键。
+     - 在 `computeSummaryStats` 中使用 `BigDecimal.valueOf(amount)` 累加已填金额，消除浮点精度误差。
+   - 实现 [`PurchasedItemViewModel`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/PurchasedItemViewModel.kt)，通过 `combine` 响应式整合数据流、搜索词、状态筛选、排序与待撤销商品状态；当列表项数量为 `1` 且用户点击 `-` 时，自动转为可撤销删除（`pendingUndoItem`），兼顾快捷操作与防误删安全。
+3. **结果如何？**
+   - 新增 12 项针对 `ItemQueryEngine` 与 `PurchasedItemViewModel` 的单元测试全部通过，全工程累计 46 项单元测试 100% 通过。
+
