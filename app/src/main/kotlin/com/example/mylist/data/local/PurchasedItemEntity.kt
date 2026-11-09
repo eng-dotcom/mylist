@@ -53,3 +53,4 @@ fun PurchasedItem.toEntity(): PurchasedItemEntity {
     updatedAtEpochMillis = updatedAtEpochMillis
   )
 }
+

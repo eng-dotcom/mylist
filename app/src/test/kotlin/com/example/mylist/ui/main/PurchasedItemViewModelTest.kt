@@ -168,3 +168,4 @@ class PurchasedItemViewModelTest {
     assertEquals(1, viewModel.uiState.value.items.first().quantity)
   }
 }
+
