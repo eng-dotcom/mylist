@@ -22,6 +22,7 @@ enum class StatusFilter(val displayName: String) {
 enum class SortOption(val displayName: String) {
   EXPIRATION_ASC("过期日期：由近到远"),
   EXPIRATION_DESC("过期日期：由远到近"),
+  CATEGORY_ASC("商品分类：同类聚合"),
   CREATED_DESC("添加时间：最新优先"),
   CREATED_ASC("添加时间：最早优先"),
   AMOUNT_DESC("金额：从高到低"),
@@ -30,14 +31,19 @@ enum class SortOption(val displayName: String) {
 }
 
 /**
+ * 按商品类别分组展示的数据模型。
+ */
+data class CategoryGroup(
+  val category: String,
+  val items: List<PurchasedItem>,
+  val itemCount: Int = items.size,
+  val totalQuantity: Int = items.sumOf { it.quantity },
+  val expiringSoonCount: Int = 0,
+  val expiredCount: Int = 0
+)
+
+/**
  * 顶部统计概览卡片数据模型。
- *
- * @property totalItemCount 商品总项数（条目数）
- * @property totalQuantityCount 商品总件数（所有商品数量之和）
- * @property expiringSoonCount 临期商品项数（0..7天）
- * @property expiredCount 已过期商品项数（<0天）
- * @property normalCount 正常商品项数（>7天）
- * @property totalSpentAmount 已填写金额的商品总花费
  */
 data class SummaryStats(
   val totalItemCount: Int = 0,
@@ -53,28 +59,61 @@ data class SummaryStats(
 }
 
 /**
- * 商品查询、状态筛选、多维排序与统计汇总纯函数引擎。
+ * 商品查询、状态与分类筛选、多维排序与统计汇总纯函数引擎。
  */
 object ItemQueryEngine {
 
   /**
-   * 对商品列表执行关键字搜索、状态筛选与多维排序。
+   * 提取当前所有可选分类列表（合并用户已录入的自定义分类与预设分类，去重并将“未分类”置于末尾）。
+   */
+  fun extractAvailableCategories(
+    items: List<PurchasedItem>,
+    includePresets: Boolean = true
+  ): List<String> {
+    val result = linkedSetOf<String>()
+    // 优先展示用户已经在商品中使用过的自定义/已有分类
+    items.map { it.category.trim() }
+      .filter { it.isNotEmpty() && it != PurchasedItem.DEFAULT_CATEGORY }
+      .forEach { result.add(it) }
+
+    if (includePresets) {
+      PurchasedItem.PRESET_CATEGORIES
+        .filter { it != PurchasedItem.DEFAULT_CATEGORY }
+        .forEach { result.add(it) }
+    }
+
+    result.add(PurchasedItem.DEFAULT_CATEGORY)
+    return result.toList()
+  }
+
+  /**
+   * 对商品列表执行关键字搜索（匹配名称或分类）、分类过滤、状态筛选与多维排序。
    */
   fun filterAndSort(
     items: List<PurchasedItem>,
     searchQuery: String,
     statusFilter: StatusFilter,
     sortOption: SortOption,
-    today: LocalDate = LocalDate.now()
+    today: LocalDate = LocalDate.now(),
+    categoryFilter: String? = null
   ): List<PurchasedItem> {
     val trimmedQuery = searchQuery.trim()
+    val trimmedCategory = categoryFilter?.trim().orEmpty()
 
     val filtered = items.asSequence()
       .filter { item ->
         if (trimmedQuery.isEmpty()) {
           true
         } else {
-          item.name.contains(trimmedQuery, ignoreCase = true)
+          item.name.contains(trimmedQuery, ignoreCase = true) ||
+            item.category.contains(trimmedQuery, ignoreCase = true)
+        }
+      }
+      .filter { item ->
+        if (trimmedCategory.isEmpty()) {
+          true
+        } else {
+          item.category.equals(trimmedCategory, ignoreCase = true)
         }
       }
       .filter { item ->
@@ -94,6 +133,17 @@ object ItemQueryEngine {
       SortOption.EXPIRATION_DESC ->
         compareByDescending<PurchasedItem> { it.expirationDate }.thenBy { it.id }
 
+      SortOption.CATEGORY_ASC ->
+        compareBy<PurchasedItem> {
+          val cat = it.category.trim().ifEmpty { PurchasedItem.DEFAULT_CATEGORY }
+          if (cat == PurchasedItem.DEFAULT_CATEGORY) 1 else 0
+        }
+          .thenBy(String.CASE_INSENSITIVE_ORDER) {
+            it.category.trim().ifEmpty { PurchasedItem.DEFAULT_CATEGORY }
+          }
+          .thenBy { it.expirationDate }
+          .thenBy { it.id }
+
       SortOption.CREATED_DESC ->
         compareByDescending<PurchasedItem> { it.createdAtEpochMillis }.thenBy { it.id }
 
@@ -104,7 +154,7 @@ object ItemQueryEngine {
         Comparator { a, b ->
           when {
             a.amount == null && b.amount == null -> a.id.compareTo(b.id)
-            a.amount == null -> 1 // 未填金额排在最后
+            a.amount == null -> 1
             b.amount == null -> -1
             else -> {
               val cmp = a.amount.compareTo(b.amount)
@@ -117,7 +167,7 @@ object ItemQueryEngine {
         Comparator { a, b ->
           when {
             a.amount == null && b.amount == null -> a.id.compareTo(b.id)
-            a.amount == null -> 1 // 未填金额排在最后
+            a.amount == null -> 1
             b.amount == null -> -1
             else -> {
               val cmp = b.amount.compareTo(a.amount)
@@ -131,6 +181,59 @@ object ItemQueryEngine {
     }
 
     return filtered.sortedWith(comparator)
+  }
+
+  /**
+   * 将商品列表按照类别（Category）进行分组聚合，计算每个类别下的商品数、总件数、临期与过期统计，
+   * 并将默认分类“未分类”固定排在末尾。
+   */
+  fun groupByCategory(
+    items: List<PurchasedItem>,
+    today: LocalDate = LocalDate.now()
+  ): List<CategoryGroup> {
+    if (items.isEmpty()) {
+      return emptyList()
+    }
+
+    val groupedMap = linkedMapOf<String, MutableList<PurchasedItem>>()
+    for (item in items) {
+      val normalizedCategory = item.category.trim().ifEmpty { PurchasedItem.DEFAULT_CATEGORY }
+      groupedMap.getOrPut(normalizedCategory) { mutableListOf() }.add(item)
+    }
+
+    val orderedKeys = groupedMap.keys.sortedWith(
+      Comparator { a, b ->
+        when {
+          a == b -> 0
+          a == PurchasedItem.DEFAULT_CATEGORY -> 1
+          b == PurchasedItem.DEFAULT_CATEGORY -> -1
+          else -> 0 // 保持首次出现的顺序
+        }
+      }
+    )
+
+    return orderedKeys.map { category ->
+      val groupItems = groupedMap[category].orEmpty()
+      var expiringSoon = 0
+      var expired = 0
+      var totalQty = 0
+      for (item in groupItems) {
+        totalQty += item.quantity
+        when (item.expirationStatus(today)) {
+          ExpirationStatus.EXPIRING_SOON -> expiringSoon++
+          ExpirationStatus.EXPIRED -> expired++
+          ExpirationStatus.NORMAL -> Unit
+        }
+      }
+      CategoryGroup(
+        category = category,
+        items = groupItems,
+        itemCount = groupItems.size,
+        totalQuantity = totalQty,
+        expiringSoonCount = expiringSoon,
+        expiredCount = expired
+      )
+    }
   }
 
   /**
@@ -172,4 +275,3 @@ object ItemQueryEngine {
     )
   }
 }
-

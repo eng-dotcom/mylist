@@ -68,3 +68,16 @@
 3. **结果如何？**
    - 新增 7 项针对自适应断点计算与表单状态回填/校验的单元测试，全工程累计 54 项单元测试全部通过，且 Debug APK 编译打包（`assembleDebug`）一次成功。
 
+---
+
+## [2026-11-09] 阶段 5 (Issue #5)：新增商品分类（Category）功能，支持输入/选择分类及按类别分组展示
+
+1. **遇到了什么问题？**
+   - 用户提出新需求：商品需要支持分类（Category），既能手动输入新的自定义分类，也能从已有分类中直接选择，并且主列表需要支持**按照类别进行展示**；同时老版本 SQLite 表结构（v1）无 `category` 列，需保证旧数据升级不丢失。
+2. **采取了什么技术方案？**
+   - 在 [`PurchasedItem`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/model/PurchasedItem.kt)、[`PurchasedItemEntity`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/data/local/PurchasedItemEntity.kt) 与 [`AppDatabase`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/data/local/AppDatabase.kt) 中新增 `category` 字段（默认 `"未分类"`），将数据库升级至 v2 并通过 `ALTER TABLE purchased_items ADD COLUMN category TEXT NOT NULL DEFAULT '未分类'` 实现平滑迁移。
+   - 在 [`ItemQueryEngine`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/query/ItemQueryEngine.kt) 中新增 `extractAvailableCategories`（自动合并用户历史自定义分类与常用预设分类并去重）、`groupByCategory`（按类别分组聚合，计算各分类商品项数、总件数、临期数与已过期数，且将 `"未分类"` 置于末尾）、`SortOption.CATEGORY_ASC`（按分类同类聚合排序）以及按分类筛选与分类关键字搜索能力。
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 中新增 [`CategoryGroupHeader`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L397-L483) 分类分组标题栏（支持点击折叠/展开各分类商品，并展示分类内件数与临期/过期提醒），在顶部栏与筛选栏提供“按类别分组 / 列表视图”一键切换；在 [`AddEditItemDialog`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 中支持手动输入新分类或点选已有分类。
+3. **结果如何？**
+   - `CategoryFeatureTest` 扩展至 11 项单元测试（涵盖自定义分类、已有分类合并、按类别分组展示 `groupByCategory`、按分类聚合排序、ViewModel 分组模式切换、超长分类拦截、空分类归一化及数据库迁移 SQL），全工程 65 项单元测试全部通过。
+

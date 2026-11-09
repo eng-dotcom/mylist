@@ -1,6 +1,5 @@
 package com.example.mylist.ui.main
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -67,6 +67,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.mylist.domain.model.ExpirationStatus
 import com.example.mylist.domain.model.PurchasedItem
+import com.example.mylist.domain.query.CategoryGroup
 import com.example.mylist.domain.query.ItemQueryEngine
 import com.example.mylist.domain.query.SortOption
 import com.example.mylist.domain.query.StatusFilter
@@ -108,6 +109,8 @@ fun MainScreen(
     uiState = uiState,
     snackbarHostState = snackbarHostState,
     onSearchQueryChange = viewModel::updateSearchQuery,
+    onCategoryFilterChange = viewModel::updateCategoryFilter,
+    onToggleGroupByCategory = viewModel::toggleGroupByCategory,
     onStatusFilterChange = viewModel::updateStatusFilter,
     onSortOptionChange = viewModel::updateSortOption,
     onAddClick = {
@@ -125,6 +128,7 @@ fun MainScreen(
   activeFormState?.let { currentForm ->
     AddEditItemDialog(
       formState = currentForm,
+      availableCategories = uiState.availableCategories,
       onFormChange = { activeFormState = it },
       onDismiss = {
         viewModel.clearError()
@@ -139,6 +143,7 @@ fun MainScreen(
             viewModel.updateItem(
               id = currentForm.editingItemId!!,
               rawName = currentForm.name,
+              rawCategory = currentForm.category,
               rawQuantity = currentForm.quantity,
               rawAmount = currentForm.amount,
               expirationDate = currentForm.expirationDate,
@@ -147,6 +152,7 @@ fun MainScreen(
           } else {
             viewModel.addItem(
               rawName = currentForm.name,
+              rawCategory = currentForm.category,
               rawQuantity = currentForm.quantity,
               rawAmount = currentForm.amount,
               expirationDate = currentForm.expirationDate
@@ -178,9 +184,12 @@ fun MainScreenContent(
   onIncrementQuantity: (PurchasedItem) -> Unit,
   onDecrementQuantity: (PurchasedItem) -> Unit,
   modifier: Modifier = Modifier,
+  onCategoryFilterChange: (String?) -> Unit = {},
+  onToggleGroupByCategory: () -> Unit = {},
   today: LocalDate = LocalDate.now()
 ) {
   var sortMenuExpanded by remember { mutableStateOf(false) }
+  var collapsedCategories by remember { mutableStateOf(setOf<String>()) }
 
   Scaffold(
     modifier = modifier.fillMaxSize(),
@@ -195,13 +204,20 @@ fun MainScreenContent(
               fontWeight = FontWeight.Bold
             )
             Text(
-              text = uiState.sortOption.displayName,
+              text = "${if (uiState.isGroupedByCategory) "按类别分组 · " else ""}${uiState.sortOption.displayName}",
               style = MaterialTheme.typography.labelSmall,
               color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
             )
           }
         },
         actions = {
+          TextButton(onClick = onToggleGroupByCategory) {
+            Text(
+              text = if (uiState.isGroupedByCategory) "▣ 分类视图" else "☰ 列表视图",
+              color = MaterialTheme.colorScheme.onPrimaryContainer,
+              fontWeight = FontWeight.SemiBold
+            )
+          }
           Box {
             TextButton(onClick = { sortMenuExpanded = true }) {
               Text(
@@ -281,18 +297,23 @@ fun MainScreenContent(
           )
         }
 
-        // 2. 搜索栏与状态快捷筛选（跨全部列）
+        // 2. 搜索栏、状态与分类快捷筛选（跨全部列）
         item(span = { GridItemSpan(maxLineSpan) }) {
           SearchAndFilterSection(
             searchQuery = uiState.searchQuery,
+            selectedCategory = uiState.selectedCategory,
+            availableCategories = uiState.availableCategories,
+            isGroupedByCategory = uiState.isGroupedByCategory,
             selectedFilter = uiState.statusFilter,
             summaryStats = uiState.summaryStats,
             onSearchQueryChange = onSearchQueryChange,
+            onCategoryFilterChange = onCategoryFilterChange,
+            onToggleGroupByCategory = onToggleGroupByCategory,
             onStatusFilterChange = onStatusFilterChange
           )
         }
 
-        // 3. 商品列表或空状态提示
+        // 3. 商品列表（支持按类别分组展示或平铺展示）或空状态提示
         if (uiState.items.isEmpty()) {
           item(span = { GridItemSpan(maxLineSpan) }) {
             EmptyStateCard(
@@ -300,9 +321,48 @@ fun MainScreenContent(
               onAddClick = onAddClick,
               onResetFilters = {
                 onSearchQueryChange("")
+                onCategoryFilterChange(null)
                 onStatusFilterChange(StatusFilter.ALL)
               }
             )
+          }
+        } else if (uiState.isGroupedByCategory) {
+          val groups = uiState.categoryGroups.ifEmpty {
+            ItemQueryEngine.groupByCategory(uiState.items, today)
+          }
+          groups.forEach { group ->
+            val isCollapsed = collapsedCategories.contains(group.category)
+            item(
+              key = "category_header_${group.category}",
+              span = { GridItemSpan(maxLineSpan) }
+            ) {
+              CategoryGroupHeader(
+                group = group,
+                isCollapsed = isCollapsed,
+                onToggleCollapse = {
+                  collapsedCategories = if (isCollapsed) {
+                    collapsedCategories - group.category
+                  } else {
+                    collapsedCategories + group.category
+                  }
+                }
+              )
+            }
+            if (!isCollapsed) {
+              items(
+                items = group.items,
+                key = { it.id }
+              ) { item ->
+                PurchasedItemCard(
+                  item = item,
+                  today = today,
+                  onIncrement = { onIncrementQuantity(item) },
+                  onDecrement = { onDecrementQuantity(item) },
+                  onEdit = { onEditItem(item) },
+                  onDelete = { onDeleteItem(item) }
+                )
+              }
+            }
           }
         } else {
           items(
@@ -316,6 +376,91 @@ fun MainScreenContent(
               onDecrement = { onDecrementQuantity(item) },
               onEdit = { onEditItem(item) },
               onDelete = { onDeleteItem(item) }
+            )
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * 按类别展示时的分类分组标题栏（显示分类名称、分类下条目数与总件数、临期/过期高亮徽章，支持点击折叠/展开）。
+ */
+@Composable
+fun CategoryGroupHeader(
+  group: CategoryGroup,
+  isCollapsed: Boolean,
+  onToggleCollapse: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Surface(
+    onClick = onToggleCollapse,
+    modifier = modifier
+      .fillMaxWidth()
+      .padding(top = 4.dp),
+    shape = RoundedCornerShape(12.dp),
+    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.75f)
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 10.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        Text(
+          text = if (isCollapsed) "▸" else "▾",
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+        Text(
+          text = group.category,
+          style = MaterialTheme.typography.titleSmall,
+          fontWeight = FontWeight.Bold,
+          color = MaterialTheme.colorScheme.onSecondaryContainer
+        )
+        Text(
+          text = "${group.itemCount} 项 · 共 ${group.totalQuantity} 件",
+          style = MaterialTheme.typography.labelMedium,
+          color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+        )
+      }
+
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        if (group.expiredCount > 0) {
+          Surface(
+            color = Color(0xFFFFEBEE),
+            shape = RoundedCornerShape(999.dp)
+          ) {
+            Text(
+              text = "已过期 ${group.expiredCount}",
+              color = Color(0xFFC62828),
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+          }
+        }
+        if (group.expiringSoonCount > 0) {
+          Surface(
+            color = Color(0xFFFFF3E0),
+            shape = RoundedCornerShape(999.dp)
+          ) {
+            Text(
+              text = "临期 ${group.expiringSoonCount}",
+              color = Color(0xFFE65100),
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
             )
           }
         }
@@ -460,14 +605,19 @@ private fun SummaryMetricItem(
 }
 
 /**
- * 搜索输入框与状态过滤标签栏。
+ * 搜索输入框、保质期状态过滤标签栏与分类快捷筛选栏。
  */
 @Composable
 fun SearchAndFilterSection(
   searchQuery: String,
+  selectedCategory: String?,
+  availableCategories: List<String>,
+  isGroupedByCategory: Boolean,
   selectedFilter: StatusFilter,
   summaryStats: SummaryStats,
   onSearchQueryChange: (String) -> Unit,
+  onCategoryFilterChange: (String?) -> Unit,
+  onToggleGroupByCategory: () -> Unit,
   onStatusFilterChange: (StatusFilter) -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -481,8 +631,8 @@ fun SearchAndFilterSection(
       modifier = Modifier.fillMaxWidth(),
       singleLine = true,
       shape = RoundedCornerShape(12.dp),
-      label = { Text("搜索已购商品名称") },
-      placeholder = { Text("输入关键字过滤...") },
+      label = { Text("搜索已购商品名称或分类") },
+      placeholder = { Text("输入名称或分类关键字...") },
       trailingIcon = {
         if (searchQuery.isNotEmpty()) {
           TextButton(onClick = { onSearchQueryChange("") }) {
@@ -492,6 +642,7 @@ fun SearchAndFilterSection(
       }
     )
 
+    // 保质期状态过滤标签行
     Row(
       modifier = Modifier
         .fillMaxWidth()
@@ -522,11 +673,55 @@ fun SearchAndFilterSection(
         )
       }
     }
+
+    // 分类快捷过滤与按类别分组开关行
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .horizontalScroll(rememberScrollState()),
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      FilterChip(
+        selected = isGroupedByCategory,
+        onClick = onToggleGroupByCategory,
+        label = {
+          Text(
+            text = if (isGroupedByCategory) "✓ 按类别分组" else "按类别分组",
+            fontWeight = if (isGroupedByCategory) FontWeight.Bold else FontWeight.Normal
+          )
+        },
+        colors = FilterChipDefaults.filterChipColors(
+          selectedContainerColor = MaterialTheme.colorScheme.tertiaryContainer,
+          selectedLabelColor = MaterialTheme.colorScheme.onTertiaryContainer
+        )
+      )
+      Text(
+        text = "| 分类筛选：",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+      FilterChip(
+        selected = selectedCategory == null,
+        onClick = { onCategoryFilterChange(null) },
+        label = { Text("全部分类") }
+      )
+      availableCategories.forEach { category ->
+        val isSelected = selectedCategory == category
+        FilterChip(
+          selected = isSelected,
+          onClick = {
+            onCategoryFilterChange(if (isSelected) null else category)
+          },
+          label = { Text(category) }
+        )
+      }
+    }
   }
 }
 
 /**
- * 单个已购商品卡片组件：包含视觉高亮过期状态标签、快捷 +/- 数量按钮、可选金额展示、编辑与删除操作。
+ * 单个已购商品卡片组件：包含分类标签、视觉高亮过期状态标签、快捷 +/- 数量按钮、可选金额展示、编辑与删除操作。
  */
 @Composable
 fun PurchasedItemCard(
@@ -539,21 +734,18 @@ fun PurchasedItemCard(
   modifier: Modifier = Modifier
 ) {
   val expInfo = item.expirationInfo(today)
-  val (badgeBgColor, badgeTextColor, cardBorderColor) = when (expInfo.status) {
-    ExpirationStatus.EXPIRED -> Triple(
+  val (badgeBgColor, badgeTextColor) = when (expInfo.status) {
+    ExpirationStatus.EXPIRED -> Pair(
       Color(0xFFFFEBEE),
-      Color(0xFFC62828),
-      Color(0xFFEF9A9A)
+      Color(0xFFC62828)
     )
-    ExpirationStatus.EXPIRING_SOON -> Triple(
+    ExpirationStatus.EXPIRING_SOON -> Pair(
       Color(0xFFFFF3E0),
-      Color(0xFFE65100),
-      Color(0xFFFFCC80)
+      Color(0xFFE65100)
     )
-    ExpirationStatus.NORMAL -> Triple(
+    ExpirationStatus.NORMAL -> Pair(
       Color(0xFFE8F5E9),
-      Color(0xFF2E7D32),
-      MaterialTheme.colorScheme.outlineVariant
+      Color(0xFF2E7D32)
     )
   }
 
@@ -571,20 +763,37 @@ fun PurchasedItemCard(
         .padding(16.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      // 第一行：商品名称 + 临期/过期视觉状态高亮标签
+      // 第一行：商品名称 + 分类标签 + 临期/过期视觉状态高亮标签
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Text(
-          text = item.name,
-          style = MaterialTheme.typography.titleMedium,
-          fontWeight = FontWeight.Bold,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis,
-          modifier = Modifier.weight(1f)
-        )
+        Row(
+          modifier = Modifier.weight(1f),
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          Surface(
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            shape = RoundedCornerShape(6.dp)
+          ) {
+            Text(
+              text = item.category,
+              color = MaterialTheme.colorScheme.onTertiaryContainer,
+              style = MaterialTheme.typography.labelSmall,
+              fontWeight = FontWeight.Medium,
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+          Text(
+            text = item.name,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
         Spacer(modifier = Modifier.width(8.dp))
         Surface(
           color = badgeBgColor,
@@ -725,9 +934,9 @@ fun EmptyStateCard(
       )
       Text(
         text = if (hasAnyItemsInDb) {
-          "可以尝试清空搜索词或切换状态筛选标签"
+          "可以尝试清空搜索词或切换分类/状态筛选标签"
         } else {
-          "点击右下角「＋ 新增」按钮，开始管理商品的数量、金额与过期日期"
+          "点击右下角「＋ 新增」按钮，开始管理商品的分类、数量、金额与过期日期"
         },
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -746,17 +955,19 @@ fun EmptyStateCard(
 }
 
 /**
- * 新增 / 编辑商品表单弹窗（内置 Material 3 [DatePickerDialog] 选择过期日期）。
+ * 新增 / 编辑商品表单弹窗（支持输入新分类或从已有分类选择）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddEditItemDialog(
   formState: ItemFormState,
+  availableCategories: List<String>,
   onFormChange: (ItemFormState) -> Unit,
   onDismiss: () -> Unit,
   onConfirm: () -> Unit
 ) {
   var showDatePicker by remember { mutableStateOf(false) }
+  var categoryDropdownExpanded by remember { mutableStateOf(false) }
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -768,7 +979,9 @@ fun AddEditItemDialog(
     },
     text = {
       Column(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
         if (formState.errorMessage != null) {
@@ -794,6 +1007,64 @@ fun AddEditItemDialog(
           singleLine = true,
           modifier = Modifier.fillMaxWidth()
         )
+
+        // 分类输入与已有分类选择区
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+              value = formState.category,
+              onValueChange = { onFormChange(formState.copy(category = it, errorMessage = null)) },
+              label = { Text("商品分类（可输入新分类或选择已有）") },
+              placeholder = { Text("例如：食品生鲜、饮品乳品") },
+              singleLine = true,
+              trailingIcon = {
+                TextButton(onClick = { categoryDropdownExpanded = true }) {
+                  Text("已有 ▾")
+                }
+              },
+              modifier = Modifier.fillMaxWidth()
+            )
+
+            DropdownMenu(
+              expanded = categoryDropdownExpanded,
+              onDismissRequest = { categoryDropdownExpanded = false }
+            ) {
+              availableCategories.forEach { existingCat ->
+                DropdownMenuItem(
+                  text = { Text(existingCat) },
+                  onClick = {
+                    onFormChange(formState.copy(category = existingCat, errorMessage = null))
+                    categoryDropdownExpanded = false
+                  }
+                )
+              }
+            }
+          }
+
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Text(
+              text = "快捷选择：",
+              style = MaterialTheme.typography.labelSmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            availableCategories.forEach { categoryOption ->
+              val isSelected = formState.category.trim() == categoryOption
+              FilterChip(
+                selected = isSelected,
+                onClick = {
+                  onFormChange(formState.copy(category = categoryOption, errorMessage = null))
+                },
+                label = { Text(categoryOption, style = MaterialTheme.typography.labelSmall) }
+              )
+            }
+          }
+        }
 
         OutlinedTextField(
           value = formState.quantity,
@@ -892,6 +1163,7 @@ private val previewItems = listOf(
   PurchasedItem(
     id = 1L,
     name = "希腊酸奶",
+    category = "饮品乳品",
     quantity = 2,
     amount = 18.50,
     expirationDate = previewToday.minusDays(1)
@@ -899,6 +1171,7 @@ private val previewItems = listOf(
   PurchasedItem(
     id = 2L,
     name = "有机纯牛奶",
+    category = "饮品乳品",
     quantity = 1,
     amount = 29.90,
     expirationDate = previewToday.plusDays(3)
@@ -906,6 +1179,7 @@ private val previewItems = listOf(
   PurchasedItem(
     id = 3L,
     name = "苏打矿泉水",
+    category = "日用百货",
     quantity = 6,
     amount = null,
     expirationDate = previewToday.plusDays(30)

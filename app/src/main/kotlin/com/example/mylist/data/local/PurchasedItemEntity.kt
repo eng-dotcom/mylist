@@ -8,6 +8,7 @@ import java.time.LocalDate
  *
  * @property id 主键 ID（新建时为 0L，插入数据库后自动递增）
  * @property name 商品名称（非空）
+ * @property category 商品分类（非空，默认 "未分类"）
  * @property quantity 商品数量（正整数 >= 1）
  * @property amount 商品金额（可空，null 表示未填写）
  * @property expirationDateEpochDay 过期日期（使用 [LocalDate.toEpochDay] 存储）
@@ -17,6 +18,7 @@ import java.time.LocalDate
 data class PurchasedItemEntity(
   val id: Long = 0L,
   val name: String,
+  val category: String = PurchasedItem.DEFAULT_CATEGORY,
   val quantity: Int,
   val amount: Double? = null,
   val expirationDateEpochDay: Long,
@@ -31,6 +33,7 @@ fun PurchasedItemEntity.toDomainModel(): PurchasedItem {
   return PurchasedItem(
     id = id,
     name = name,
+    category = category,
     quantity = quantity,
     amount = amount,
     expirationDate = LocalDate.ofEpochDay(expirationDateEpochDay),
@@ -46,6 +49,7 @@ fun PurchasedItem.toEntity(): PurchasedItemEntity {
   return PurchasedItemEntity(
     id = id,
     name = name,
+    category = category,
     quantity = quantity,
     amount = amount,
     expirationDateEpochDay = expirationDate.toEpochDay(),
@@ -53,4 +57,3 @@ fun PurchasedItem.toEntity(): PurchasedItemEntity {
     updatedAtEpochMillis = updatedAtEpochMillis
   )
 }
-

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mylist.data.repository.PurchasedItemRepository
 import com.example.mylist.domain.model.PurchasedItem
+import com.example.mylist.domain.query.CategoryGroup
 import com.example.mylist.domain.query.ItemQueryEngine
 import com.example.mylist.domain.query.SortOption
 import com.example.mylist.domain.query.StatusFilter
@@ -21,8 +22,12 @@ import kotlinx.coroutines.launch
  */
 data class PurchasedItemUiState(
   val items: List<PurchasedItem> = emptyList(),
+  val categoryGroups: List<CategoryGroup> = ItemQueryEngine.groupByCategory(items),
+  val isGroupedByCategory: Boolean = true,
   val allItemsCount: Int = 0,
   val searchQuery: String = "",
+  val selectedCategory: String? = null,
+  val availableCategories: List<String> = PurchasedItem.PRESET_CATEGORIES,
   val statusFilter: StatusFilter = StatusFilter.ALL,
   val sortOption: SortOption = SortOption.EXPIRATION_ASC,
   val summaryStats: SummaryStats = SummaryStats(),
@@ -32,7 +37,7 @@ data class PurchasedItemUiState(
 )
 
 /**
- * 已购商品管理主视图模型，负责协调仓库层数据流、搜索/状态筛选/多维排序、顶部统计计算与 Undo 撤销交互。
+ * 已购商品管理主视图模型，负责协调仓库层数据流、搜索/分类与状态筛选/按类别分组展示/多维排序、顶部统计计算与 Undo 撤销交互。
  */
 class PurchasedItemViewModel(
   private val repository: PurchasedItemRepository,
@@ -40,6 +45,8 @@ class PurchasedItemViewModel(
 ) : ViewModel() {
 
   private val searchQueryFlow = MutableStateFlow("")
+  private val categoryFilterFlow = MutableStateFlow<String?>(null)
+  private val groupByCategoryFlow = MutableStateFlow(true)
   private val statusFilterFlow = MutableStateFlow(StatusFilter.ALL)
   private val sortOptionFlow = MutableStateFlow(SortOption.EXPIRATION_ASC)
   private val pendingUndoFlow = MutableStateFlow<PurchasedItem?>(null)
@@ -52,17 +59,28 @@ class PurchasedItemViewModel(
     viewModelScope.launch {
       combine(
         repository.getAllItemsStream(),
-        searchQueryFlow,
+        combine(searchQueryFlow, categoryFilterFlow, groupByCategoryFlow) { q, cat, grouped ->
+          Triple(q, cat, grouped)
+        },
         statusFilterFlow,
         sortOptionFlow,
         combine(pendingUndoFlow, errorFlow) { undo, err -> undo to err }
-      ) { allItems, query, filter, sort, (undoItem, errorMsg) ->
+      ) { allItems, (query, categoryFilter, isGrouped), filter, sort, (undoItem, errorMsg) ->
         val today = todayProvider()
+        val availableCategories = ItemQueryEngine.extractAvailableCategories(
+          items = allItems,
+          includePresets = true
+        )
         val filteredAndSorted = ItemQueryEngine.filterAndSort(
           items = allItems,
           searchQuery = query,
           statusFilter = filter,
           sortOption = sort,
+          today = today,
+          categoryFilter = categoryFilter
+        )
+        val categoryGroups = ItemQueryEngine.groupByCategory(
+          items = filteredAndSorted,
           today = today
         )
         val stats = ItemQueryEngine.computeSummaryStats(
@@ -71,8 +89,12 @@ class PurchasedItemViewModel(
         )
         PurchasedItemUiState(
           items = filteredAndSorted,
+          categoryGroups = categoryGroups,
+          isGroupedByCategory = isGrouped,
           allItemsCount = allItems.size,
           searchQuery = query,
+          selectedCategory = categoryFilter,
+          availableCategories = availableCategories,
           statusFilter = filter,
           sortOption = sort,
           summaryStats = stats,
@@ -88,6 +110,18 @@ class PurchasedItemViewModel(
 
   fun updateSearchQuery(query: String) {
     searchQueryFlow.value = query
+  }
+
+  fun updateCategoryFilter(category: String?) {
+    categoryFilterFlow.value = category?.takeIf { it.isNotBlank() }
+  }
+
+  fun toggleGroupByCategory() {
+    groupByCategoryFlow.value = !groupByCategoryFlow.value
+  }
+
+  fun setGroupByCategory(grouped: Boolean) {
+    groupByCategoryFlow.value = grouped
   }
 
   fun updateStatusFilter(filter: StatusFilter) {
@@ -107,16 +141,18 @@ class PurchasedItemViewModel(
   }
 
   /**
-   * 校验表单输入并新增商品。若校验失败，设置 [errorMessage] 并返回 false。
+   * 校验表单输入并新增商品（支持自定义分类或从已有分类选择）。
    */
   fun addItem(
     rawName: String,
     rawQuantity: String,
     rawAmount: String?,
-    expirationDate: LocalDate?
+    expirationDate: LocalDate?,
+    rawCategory: String? = null
   ): Boolean {
     val validation = PurchasedItemValidator.validateAndCreate(
       rawName = rawName,
+      rawCategory = rawCategory,
       rawQuantity = rawQuantity,
       rawAmount = rawAmount,
       expirationDate = expirationDate
@@ -131,6 +167,7 @@ class PurchasedItemViewModel(
     viewModelScope.launch {
       repository.addItem(
         name = validItem.name,
+        category = validItem.category,
         quantity = validItem.quantity,
         amount = validItem.amount,
         expirationDate = validItem.expirationDate
@@ -142,7 +179,7 @@ class PurchasedItemViewModel(
   }
 
   /**
-   * 校验表单输入并更新已有商品。若校验失败，设置 [errorMessage] 并返回 false。
+   * 校验表单输入并更新已有商品（含商品分类）。
    */
   fun updateItem(
     id: Long,
@@ -150,11 +187,13 @@ class PurchasedItemViewModel(
     rawQuantity: String,
     rawAmount: String?,
     expirationDate: LocalDate?,
-    createdAtEpochMillis: Long
+    createdAtEpochMillis: Long,
+    rawCategory: String? = null
   ): Boolean {
     val validation = PurchasedItemValidator.validateAndCreate(
       id = id,
       rawName = rawName,
+      rawCategory = rawCategory,
       rawQuantity = rawQuantity,
       rawAmount = rawAmount,
       expirationDate = expirationDate,
@@ -232,4 +271,3 @@ class PurchasedItemViewModel(
     }
   }
 }
-
