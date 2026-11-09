@@ -66,6 +66,7 @@ data class AdaptiveLayoutConfig(
 data class ItemFormState(
   val editingItemId: Long? = null,
   val name: String = "",
+  val category: String = PurchasedItem.DEFAULT_CATEGORY,
   val quantity: String = "1",
   val amount: String = "",
   val expirationDate: LocalDate = LocalDate.now().plusDays(7),
@@ -82,6 +83,7 @@ data class ItemFormState(
     val result = PurchasedItemValidator.validateAndCreate(
       id = editingItemId ?: 0L,
       rawName = name,
+      rawCategory = category,
       rawQuantity = quantity,
       rawAmount = amount,
       expirationDate = expirationDate,
@@ -99,6 +101,7 @@ data class ItemFormState(
       return ItemFormState(
         editingItemId = null,
         name = "",
+        category = PurchasedItem.DEFAULT_CATEGORY,
         quantity = "1",
         amount = "",
         expirationDate = defaultDate,
@@ -112,6 +115,7 @@ data class ItemFormState(
       return ItemFormState(
         editingItemId = item.id,
         name = item.name,
+        category = item.category,
         quantity = item.quantity.toString(),
         amount = formattedAmount,
         expirationDate = item.expirationDate,
@@ -121,4 +125,3 @@ data class ItemFormState(
     }
   }
 }
-

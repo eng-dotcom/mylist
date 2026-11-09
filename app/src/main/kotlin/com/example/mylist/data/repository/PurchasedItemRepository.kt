@@ -10,7 +10,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 /**
- * 已购商品仓库层接口，提供增删改查、快捷数量加减与误删恢复（Undo）能力。
+ * 已购商品仓库层接口，提供增删改查、分类持久化、快捷数量加减与误删恢复（Undo）能力。
  */
 interface PurchasedItemRepository {
   /**
@@ -31,7 +31,8 @@ interface PurchasedItemRepository {
     quantity: Int,
     amount: Double?,
     expirationDate: LocalDate,
-    nowMillis: Long = System.currentTimeMillis()
+    nowMillis: Long = System.currentTimeMillis(),
+    category: String = PurchasedItem.DEFAULT_CATEGORY
   ): Result<Long>
 
   /**
@@ -74,6 +75,13 @@ class DefaultPurchasedItemRepository(
   private val dao: PurchasedItemDao
 ) : PurchasedItemRepository {
 
+  private data class ValidatedFields(
+    val name: String,
+    val category: String,
+    val quantity: Int,
+    val amount: Double?
+  )
+
   @Volatile
   private var lastDeletedItem: PurchasedItem? = null
 
@@ -92,16 +100,18 @@ class DefaultPurchasedItemRepository(
     quantity: Int,
     amount: Double?,
     expirationDate: LocalDate,
-    nowMillis: Long
+    nowMillis: Long,
+    category: String
   ): Result<Long> {
-    val validated = validateDomainFields(name, quantity, amount)
+    val validated = validateDomainFields(name, category, quantity, amount)
       .getOrElse { return Result.failure(it) }
 
     val item = PurchasedItem(
       id = 0L,
-      name = validated.first,
-      quantity = validated.second,
-      amount = validated.third,
+      name = validated.name,
+      category = validated.category,
+      quantity = validated.quantity,
+      amount = validated.amount,
       expirationDate = expirationDate,
       createdAtEpochMillis = nowMillis,
       updatedAtEpochMillis = nowMillis
@@ -117,13 +127,14 @@ class DefaultPurchasedItemRepository(
     if (item.id <= 0L) {
       return Result.failure(IllegalArgumentException("商品 ID 无效"))
     }
-    val validated = validateDomainFields(item.name, item.quantity, item.amount)
+    val validated = validateDomainFields(item.name, item.category, item.quantity, item.amount)
       .getOrElse { return Result.failure(it) }
 
     val updatedItem = item.copy(
-      name = validated.first,
-      quantity = validated.second,
-      amount = validated.third,
+      name = validated.name,
+      category = validated.category,
+      quantity = validated.quantity,
+      amount = validated.amount,
       updatedAtEpochMillis = nowMillis
     )
     val affectedRows = dao.updateItem(updatedItem.toEntity())
@@ -185,12 +196,18 @@ class DefaultPurchasedItemRepository(
 
   private fun validateDomainFields(
     rawName: String,
+    rawCategory: String?,
     quantity: Int,
     amount: Double?
-  ): Result<Triple<String, Int, Double?>> {
+  ): Result<ValidatedFields> {
     val nameResult = PurchasedItemValidator.validateName(rawName)
     if (!nameResult.isSuccess) {
       return Result.failure(IllegalArgumentException(nameResult.errorMessage))
+    }
+
+    val categoryResult = PurchasedItemValidator.validateCategory(rawCategory)
+    if (!categoryResult.isSuccess) {
+      return Result.failure(IllegalArgumentException(categoryResult.errorMessage))
     }
 
     val quantityResult = PurchasedItemValidator.validateQuantityValue(quantity)
@@ -204,12 +221,12 @@ class DefaultPurchasedItemRepository(
     }
 
     return Result.success(
-      Triple(
-        nameResult.getOrNull()!!,
-        quantityResult.getOrNull()!!,
-        amountResult.getOrNull()
+      ValidatedFields(
+        name = nameResult.getOrNull()!!,
+        category = categoryResult.getOrNull()!!,
+        quantity = quantityResult.getOrNull()!!,
+        amount = amountResult.getOrNull()
       )
     )
   }
 }
-

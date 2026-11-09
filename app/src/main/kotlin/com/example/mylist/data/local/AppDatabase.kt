@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.example.mylist.domain.model.PurchasedItem
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -31,8 +32,12 @@ class AppDatabase private constructor(
   }
 
   override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-    db.execSQL("DROP TABLE IF EXISTS $TABLE_PURCHASED_ITEMS")
-    onCreate(db)
+    if (oldVersion < 2) {
+      db.execSQL(MIGRATE_1_TO_2_SQL)
+    } else {
+      db.execSQL("DROP TABLE IF EXISTS $TABLE_PURCHASED_ITEMS")
+      onCreate(db)
+    }
   }
 
   private inner class SqlitePurchasedItemDao : PurchasedItemDao {
@@ -139,11 +144,12 @@ class AppDatabase private constructor(
 
   companion object {
     const val DATABASE_NAME = "mylist.db"
-    const val DATABASE_VERSION = 1
+    const val DATABASE_VERSION = 2
     const val TABLE_PURCHASED_ITEMS = "purchased_items"
 
     const val COL_ID = "id"
     const val COL_NAME = "name"
+    const val COL_CATEGORY = "category"
     const val COL_QUANTITY = "quantity"
     const val COL_AMOUNT = "amount"
     const val COL_EXPIRATION_EPOCH_DAY = "expirationDateEpochDay"
@@ -154,6 +160,7 @@ class AppDatabase private constructor(
       CREATE TABLE IF NOT EXISTS purchased_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT '未分类',
         quantity INTEGER NOT NULL,
         amount REAL,
         expirationDateEpochDay INTEGER NOT NULL,
@@ -161,6 +168,9 @@ class AppDatabase private constructor(
         updatedAtEpochMillis INTEGER NOT NULL
       )
     """
+
+    const val MIGRATE_1_TO_2_SQL =
+      "ALTER TABLE purchased_items ADD COLUMN category TEXT NOT NULL DEFAULT '未分类'"
 
     @Volatile
     private var INSTANCE: AppDatabase? = null
@@ -177,6 +187,7 @@ class AppDatabase private constructor(
           put(COL_ID, id)
         }
         put(COL_NAME, name)
+        put(COL_CATEGORY, category)
         put(COL_QUANTITY, quantity)
         if (amount != null) {
           put(COL_AMOUNT, amount)
@@ -192,15 +203,23 @@ class AppDatabase private constructor(
     private fun Cursor.toEntity(): PurchasedItemEntity {
       val idIndex = getColumnIndexOrThrow(COL_ID)
       val nameIndex = getColumnIndexOrThrow(COL_NAME)
+      val categoryIndex = getColumnIndex(COL_CATEGORY)
       val quantityIndex = getColumnIndexOrThrow(COL_QUANTITY)
       val amountIndex = getColumnIndexOrThrow(COL_AMOUNT)
       val expirationIndex = getColumnIndexOrThrow(COL_EXPIRATION_EPOCH_DAY)
       val createdIndex = getColumnIndexOrThrow(COL_CREATED_AT)
       val updatedIndex = getColumnIndexOrThrow(COL_UPDATED_AT)
 
+      val categoryValue = if (categoryIndex >= 0 && !isNull(categoryIndex)) {
+        getString(categoryIndex)
+      } else {
+        PurchasedItem.DEFAULT_CATEGORY
+      }
+
       return PurchasedItemEntity(
         id = getLong(idIndex),
         name = getString(nameIndex),
+        category = categoryValue,
         quantity = getInt(quantityIndex),
         amount = if (isNull(amountIndex)) null else getDouble(amountIndex),
         expirationDateEpochDay = getLong(expirationIndex),
@@ -210,4 +229,3 @@ class AppDatabase private constructor(
     }
   }
 }
-

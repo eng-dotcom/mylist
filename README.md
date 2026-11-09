@@ -55,6 +55,7 @@ erDiagram
     PURCHASED_ITEMS {
         Long id PK "主键，自增 (autoGenerate = true)"
         String name "商品名称 (非空，去除首尾空格)"
+        String category "商品分类 (非空，默认 '未分类'，可输入新分类或从已有分类选择)"
         Int quantity "商品数量 (正整数 >= 1)"
         Double amount "商品金额 (可空，null 表示未填；填写时 >= 0)"
         Long expirationDateEpochDay "过期日期 (LocalDate.toEpochDay()，按天存储)"
@@ -68,6 +69,7 @@ erDiagram
 | :--- | :--- | :---: | :--- |
 | `id` | `Long` | 是 | 主键，自动递增 |
 | `name` | `String` | 是 | 商品名称，非空字符串 |
+| `category` | `String` | 是 | 商品分类，默认 `"未分类"`，支持手动输入新分类或从已有分类选择 |
 | `quantity` | `Int` | 是 | 商品数量，纯正整数（`>= 1`） |
 | `amount` | `Double?` | 否 | 商品金额，选填（可为 `null`）；填写时 `>= 0` |
 | `expirationDateEpochDay` | `Long` | 是 | 过期日期，使用 `LocalDate.toEpochDay()` 存储 |
@@ -94,7 +96,7 @@ erDiagram
 | 接口名称 | 参数说明 | 校验/业务逻辑 | 返回类型 |
 | :--- | :--- | :--- | :--- |
 | `getAllItemsStream()` | 无 | 返回实时更新的领域模型 `PurchasedItem` 列表 | `Flow<List<PurchasedItem>>` |
-| `addItem(name, quantity, amount, expirationDate)` | `name: String`, `quantity: Int`, `amount: Double?`, `expirationDate: LocalDate` | 校验名称非空、`quantity >= 1`、`amount == null \|\| amount >= 0` | `Result<Long>` |
+| `addItem(name, category, quantity, amount, expirationDate)` | `name: String`, `category: String`, `quantity: Int`, `amount: Double?`, `expirationDate: LocalDate` | 校验名称非空、分类去空（空则归为`"未分类"`）、`quantity >= 1`、`amount == null \|\| amount >= 0` | `Result<Long>` |
 | `updateItem(item: PurchasedItem)` | `item: PurchasedItem` | 校验修改后的字段合法性并更新 `updatedAt` | `Result<Unit>` |
 | `adjustQuantity(id: Long, delta: Int)` | `id: Long`, `delta: Int` (`+1` 或 `-1`) | 快捷加减数量；若调整后 `quantity < 1` 则返回边界提示或拒绝直接减为负数 | `Result<PurchasedItem>` |
 | `deleteItem(item: PurchasedItem)` | `item: PurchasedItem` | 删除商品并缓存最后删除项以支持 Undo 恢复 | `Result<Unit>` |
@@ -104,6 +106,8 @@ erDiagram
 | 接口/纯函数名称 | 参数说明 | 功能描述 |
 | :--- | :--- | :--- |
 | `computeExpirationStatus(expirationDate, today)` | `expirationDate: LocalDate`, `today: LocalDate` | 计算商品状态：`EXPIRED` (<0天)、`EXPIRING_SOON` (0~7天)、`NORMAL` (>7天) 及相差天数 |
-| `filterAndSortItems(items, query, statusFilter, sortOption, today)` | 列表、搜索词、状态过滤枚举、排序枚举、当前日期 | 执行大小写不敏感的名称搜索、状态过滤（全部/临期/已过期/正常）及多维排序 |
+| `filterAndSortItems(items, query, statusFilter, sortOption, today, categoryFilter)` | 列表、搜索词、状态过滤枚举、排序枚举、当前日期、分类过滤 | 执行大小写不敏感的名称与分类搜索、分类过滤、状态过滤（全部/临期/已过期/正常）及多维排序（含按分类同类聚合） |
+| `extractAvailableCategories(items, presetCategories)` | `items: List<PurchasedItem>`, `presetCategories: List<String>` | 提取并合并去重已有商品分类与预设常用分类列表 |
+| `groupByCategory(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 将商品按类别（Category）分组聚合，计算各分类商品项数、总件数、临期数与过期数，并将 `"未分类"` 置于末尾 |
 | `computeSummaryStats(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 计算顶部统计卡片数据：总条目数、商品总件数、临期数、已过期数、已填金额总计 |
 

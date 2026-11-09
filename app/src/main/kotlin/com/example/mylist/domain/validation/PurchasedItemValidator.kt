@@ -28,6 +28,8 @@ data class ValidationResult<out T>(
  */
 object PurchasedItemValidator {
 
+  const val MAX_CATEGORY_LENGTH = 20
+
   /**
    * 校验商品名称：去除首尾空白后不能为空。
    */
@@ -35,6 +37,22 @@ object PurchasedItemValidator {
     val trimmed = rawName.trim()
     if (trimmed.isEmpty()) {
       return ValidationResult.failure("商品名称不能为空")
+    }
+    return ValidationResult.success(trimmed)
+  }
+
+  /**
+   * 校验商品分类：
+   * - null 或空白字符串自动归为默认分类 [PurchasedItem.DEFAULT_CATEGORY]（"未分类"）
+   * - 非空时去除首尾空格，且长度不超过 [MAX_CATEGORY_LENGTH]（20 个字符）
+   */
+  fun validateCategory(rawCategory: String?): ValidationResult<String> {
+    val trimmed = rawCategory?.trim().orEmpty()
+    if (trimmed.isEmpty()) {
+      return ValidationResult.success(PurchasedItem.DEFAULT_CATEGORY)
+    }
+    if (trimmed.length > MAX_CATEGORY_LENGTH) {
+      return ValidationResult.failure("分类名称不能超过 $MAX_CATEGORY_LENGTH 个字符")
     }
     return ValidationResult.success(trimmed)
   }
@@ -118,6 +136,7 @@ object PurchasedItemValidator {
   fun validateAndCreate(
     id: Long = 0L,
     rawName: String,
+    rawCategory: String? = null,
     rawQuantity: String,
     rawAmount: String?,
     expirationDate: LocalDate?,
@@ -127,6 +146,11 @@ object PurchasedItemValidator {
     val nameResult = validateName(rawName)
     if (!nameResult.isSuccess) {
       return ValidationResult.failure(nameResult.errorMessage ?: "商品名称不合法")
+    }
+
+    val categoryResult = validateCategory(rawCategory)
+    if (!categoryResult.isSuccess) {
+      return ValidationResult.failure(categoryResult.errorMessage ?: "商品分类不合法")
     }
 
     val quantityResult = validateQuantity(rawQuantity)
@@ -149,6 +173,7 @@ object PurchasedItemValidator {
       PurchasedItem(
         id = id,
         name = nameResult.getOrNull()!!,
+        category = categoryResult.getOrNull()!!,
         quantity = quantityResult.getOrNull()!!,
         amount = amountResult.getOrNull(),
         expirationDate = dateResult.getOrNull()!!,
@@ -158,4 +183,3 @@ object PurchasedItemValidator {
     )
   }
 }
-

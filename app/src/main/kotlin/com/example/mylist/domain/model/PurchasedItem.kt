@@ -8,6 +8,7 @@ import java.util.Locale
  *
  * @property id 主键 ID（新建未持久化时为 0L）
  * @property name 商品名称（必填，非空）
+ * @property category 商品分类（非空，默认 "未分类"，支持输入新分类或从已有分类选择）
  * @property quantity 商品数量（必填，纯正整数 >= 1，不含单位）
  * @property amount 商品金额（选填，null 表示未填写；若填写则 >= 0.0）
  * @property expirationDate 过期日期（必填）
@@ -17,6 +18,7 @@ import java.util.Locale
 data class PurchasedItem(
   val id: Long = 0L,
   val name: String,
+  val category: String = DEFAULT_CATEGORY,
   val quantity: Int,
   val amount: Double? = null,
   val expirationDate: LocalDate,
@@ -51,5 +53,18 @@ data class PurchasedItem(
     val value = amount ?: return null
     return String.format(Locale.US, "¥%.2f", value)
   }
-}
 
+  companion object {
+    const val DEFAULT_CATEGORY = "未分类"
+
+    val PRESET_CATEGORIES: List<String> = listOf(
+      "食品生鲜",
+      "饮品乳品",
+      "零食烘焙",
+      "日用百货",
+      "个护清洁",
+      "医药保健",
+      DEFAULT_CATEGORY
+    )
+  }
+}
