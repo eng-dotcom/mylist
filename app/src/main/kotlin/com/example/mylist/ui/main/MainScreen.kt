@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -106,6 +107,8 @@ fun MainScreen(
     onSearchQueryChange = viewModel::updateSearchQuery,
     onCategoryFilterChange = viewModel::updateCategoryFilter,
     onToggleGroupByCategory = viewModel::toggleGroupByCategory,
+    onToggleItemExpanded = viewModel::toggleItemExpanded,
+    onToggleCategoryCollapsed = viewModel::toggleCategoryCollapsed,
     onStatusFilterChange = viewModel::updateStatusFilter,
     onSortOptionChange = viewModel::updateSortOption,
     onAddClick = {
@@ -181,10 +184,43 @@ fun MainScreenContent(
   modifier: Modifier = Modifier,
   onCategoryFilterChange: (String?) -> Unit = {},
   onToggleGroupByCategory: () -> Unit = {},
+  onToggleItemExpanded: ((Long) -> Unit)? = null,
+  onToggleCategoryCollapsed: ((String) -> Unit)? = null,
   today: LocalDate = LocalDate.now()
 ) {
   var sortMenuExpanded by remember { mutableStateOf(false) }
-  var collapsedCategories by remember { mutableStateOf(setOf<String>()) }
+  var localExpansionState by remember { mutableStateOf(ItemExpansionState()) }
+
+  val effectiveExpandedItemIds = if (onToggleItemExpanded != null) {
+    uiState.expandedItemIds
+  } else {
+    localExpansionState.expandedItemIds
+  }
+
+  val effectiveCollapsedCategories = if (onToggleCategoryCollapsed != null) {
+    uiState.collapsedCategories
+  } else {
+    localExpansionState.collapsedCategories
+  }
+
+  val handleToggleItem: (Long) -> Unit = { itemId ->
+    if (onToggleItemExpanded != null) {
+      onToggleItemExpanded(itemId)
+    } else {
+      localExpansionState = localExpansionState.toggleItem(itemId)
+    }
+  }
+
+  val handleToggleCategory: (CategoryGroup) -> Unit = { group ->
+    if (onToggleCategoryCollapsed != null) {
+      onToggleCategoryCollapsed(group.category)
+    } else {
+      localExpansionState = localExpansionState.toggleCategory(
+        category = group.category,
+        itemsInCategory = group.items.map { it.id }
+      )
+    }
+  }
 
   Scaffold(
     modifier = modifier.fillMaxSize(),
@@ -326,7 +362,7 @@ fun MainScreenContent(
             ItemQueryEngine.groupByCategory(uiState.items, today)
           }
           groups.forEach { group ->
-            val isCollapsed = collapsedCategories.contains(group.category)
+            val isCollapsed = effectiveCollapsedCategories.contains(group.category)
             item(
               key = "category_header_${group.category}",
               span = { GridItemSpan(maxLineSpan) }
@@ -334,13 +370,7 @@ fun MainScreenContent(
               CategoryGroupHeader(
                 group = group,
                 isCollapsed = isCollapsed,
-                onToggleCollapse = {
-                  collapsedCategories = if (isCollapsed) {
-                    collapsedCategories - group.category
-                  } else {
-                    collapsedCategories + group.category
-                  }
-                }
+                onToggleCollapse = { handleToggleCategory(group) }
               )
             }
             if (!isCollapsed) {
@@ -351,6 +381,8 @@ fun MainScreenContent(
                 PurchasedItemCard(
                   item = item,
                   today = today,
+                  isExpanded = effectiveExpandedItemIds.contains(item.id),
+                  onToggleExpand = { handleToggleItem(item.id) },
                   onIncrement = { onIncrementQuantity(item) },
                   onDecrement = { onDecrementQuantity(item) },
                   onEdit = { onEditItem(item) },
@@ -367,6 +399,8 @@ fun MainScreenContent(
             PurchasedItemCard(
               item = item,
               today = today,
+              isExpanded = effectiveExpandedItemIds.contains(item.id),
+              onToggleExpand = { handleToggleItem(item.id) },
               onIncrement = { onIncrementQuantity(item) },
               onDecrement = { onDecrementQuantity(item) },
               onEdit = { onEditItem(item) },
@@ -716,7 +750,9 @@ fun SearchAndFilterSection(
 }
 
 /**
- * 单个已购商品卡片组件：包含分类标签、视觉高亮过期状态标签、快捷 +/- 数量按钮、可选金额展示、编辑与删除操作。
+ * 单个已购商品卡片组件：
+ * - 默认收起态（`isExpanded = false`）：仅展示**商品名称**和**剩余过期天数（或已过期天数）**，隐藏过期日期、金额、数量及操作按钮。
+ * - 点击展开态（`isExpanded = true`）：点击商品栏后展开显示分类、过期日期、购买金额、数量快捷 `−`/`＋` 按钮以及编辑/删除操作；再次点击商品栏收起。
  */
 @Composable
 fun PurchasedItemCard(
@@ -726,10 +762,16 @@ fun PurchasedItemCard(
   onDecrement: () -> Unit,
   onEdit: () -> Unit,
   onDelete: () -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  isExpanded: Boolean = false,
+  onToggleExpand: () -> Unit = {}
 ) {
-  val expInfo = item.expirationInfo(today)
-  val (badgeBgColor, badgeTextColor) = when (expInfo.status) {
+  val displayModel = ItemCardDisplayModel.fromItem(
+    item = item,
+    isExpanded = isExpanded,
+    today = today
+  )
+  val (badgeBgColor, badgeTextColor) = when (displayModel.expirationStatus) {
     ExpirationStatus.EXPIRED -> Pair(
       Color(0xFFFFEBEE),
       Color(0xFFC62828)
@@ -745,57 +787,41 @@ fun PurchasedItemCard(
   }
 
   Card(
+    onClick = onToggleExpand,
     modifier = modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(16.dp),
+    shape = RoundedCornerShape(14.dp),
     colors = CardDefaults.cardColors(
       containerColor = MaterialTheme.colorScheme.surface
     ),
-    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    elevation = CardDefaults.cardElevation(defaultElevation = if (displayModel.isExpanded) 3.dp else 1.dp)
   ) {
     Column(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(16.dp),
+        .padding(horizontal = 16.dp, vertical = 12.dp),
       verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-      // 第一行：商品名称 + 分类标签 + 临期/过期视觉状态高亮标签
+      // 默认常驻行：仅展示商品名称 + 剩余过期天数（或已过期天数）
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Row(
-          modifier = Modifier.weight(1f),
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          Surface(
-            color = MaterialTheme.colorScheme.tertiaryContainer,
-            shape = RoundedCornerShape(6.dp)
-          ) {
-            Text(
-              text = item.category,
-              color = MaterialTheme.colorScheme.onTertiaryContainer,
-              style = MaterialTheme.typography.labelSmall,
-              fontWeight = FontWeight.Medium,
-              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
-          }
-          Text(
-            text = item.name,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-        }
+        Text(
+          text = displayModel.name,
+          style = MaterialTheme.typography.titleMedium,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f)
+        )
         Spacer(modifier = Modifier.width(8.dp))
         Surface(
           color = badgeBgColor,
           shape = RoundedCornerShape(999.dp)
         ) {
           Text(
-            text = expInfo.label,
+            text = displayModel.expirationBadgeText,
             color = badgeTextColor,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -804,91 +830,112 @@ fun PurchasedItemCard(
         }
       }
 
-      // 第二行：过期日期与金额（选填）
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text(
-          text = "过期日期：${item.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)}",
-          style = MaterialTheme.typography.bodyMedium,
-          color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-          text = item.formattedAmount()?.let { "金额：$it" } ?: "未填金额",
-          style = MaterialTheme.typography.bodyMedium,
-          fontWeight = if (item.amount != null) FontWeight.SemiBold else FontWeight.Normal,
-          color = if (item.amount != null) {
-            MaterialTheme.colorScheme.primary
-          } else {
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-          }
-        )
-      }
-
-      // 第三行：左侧快捷 +/- 调整纯整数数量，右侧编辑 / 删除按钮
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
+      // 展开详情区：只有点击商品栏展开后，才展示过期日期、金额、数量及编辑/删除按钮
+      if (displayModel.isExpanded) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
+          Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Surface(
+              color = MaterialTheme.colorScheme.tertiaryContainer,
+              shape = RoundedCornerShape(6.dp)
+            ) {
+              Text(
+                text = displayModel.category,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+              )
+            }
+            Text(
+              text = displayModel.expirationDateText.orEmpty(),
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
           Text(
-            text = "数量：",
+            text = displayModel.amountText.orEmpty(),
             style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-          )
-          Surface(
-            onClick = onDecrement,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.secondaryContainer,
-            modifier = Modifier.size(32.dp)
-          ) {
-            Box(contentAlignment = Alignment.Center) {
-              Text(
-                text = "−",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSecondaryContainer
-              )
+            fontWeight = if (item.amount != null) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (item.amount != null) {
+              MaterialTheme.colorScheme.primary
+            } else {
+              MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             }
-          }
-          Text(
-            text = "${item.quantity}",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(horizontal = 6.dp)
           )
-          Surface(
-            onClick = onIncrement,
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.primaryContainer,
-            modifier = Modifier.size(32.dp)
-          ) {
-            Box(contentAlignment = Alignment.Center) {
-              Text(
-                text = "＋",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
-              )
-            }
-          }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          TextButton(onClick = onEdit) {
-            Text("编辑")
-          }
-          TextButton(onClick = onDelete) {
+        // 数量快捷加减与编辑/删除操作栏
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
             Text(
-              text = "删除",
-              color = MaterialTheme.colorScheme.error
+              text = "数量：",
+              style = MaterialTheme.typography.bodyMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Surface(
+              onClick = onDecrement,
+              shape = CircleShape,
+              color = MaterialTheme.colorScheme.secondaryContainer,
+              modifier = Modifier.size(32.dp)
+            ) {
+              Box(contentAlignment = Alignment.Center) {
+                Text(
+                  text = "−",
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.onSecondaryContainer
+                )
+              }
+            }
+            Text(
+              text = displayModel.quantityText.orEmpty(),
+              style = MaterialTheme.typography.titleMedium,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.padding(horizontal = 6.dp)
+            )
+            Surface(
+              onClick = onIncrement,
+              shape = CircleShape,
+              color = MaterialTheme.colorScheme.primaryContainer,
+              modifier = Modifier.size(32.dp)
+            ) {
+              Box(contentAlignment = Alignment.Center) {
+                Text(
+                  text = "＋",
+                  style = MaterialTheme.typography.titleMedium,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+              }
+            }
+          }
+
+          if (displayModel.showActions) {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+              TextButton(onClick = onEdit) {
+                Text("编辑")
+              }
+              TextButton(onClick = onDelete) {
+                Text(
+                  text = "删除",
+                  color = MaterialTheme.colorScheme.error
+                )
+              }
+            }
           }
         }
       }
@@ -1008,7 +1055,7 @@ fun AddEditItemDialog(
           Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(
               value = formState.category,
-              onValueChange = { onFormChange(formState.copy(category = it, errorMessage = null)) },
+              onValueChange = { onFormChange(formState.updateCategory(it)) },
               label = { Text("商品分类（可输入新分类或选择已有）") },
               placeholder = { Text("例如：食品生鲜、饮品乳品") },
               singleLine = true,
@@ -1017,7 +1064,16 @@ fun AddEditItemDialog(
                   Text("已有 ▾")
                 }
               },
-              modifier = Modifier.fillMaxWidth()
+              modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                  if (focusState.isFocused) {
+                    val updated = formState.onCategoryFocus()
+                    if (updated != formState) {
+                      onFormChange(updated)
+                    }
+                  }
+                }
             )
 
             DropdownMenu(
@@ -1028,7 +1084,7 @@ fun AddEditItemDialog(
                 DropdownMenuItem(
                   text = { Text(existingCat) },
                   onClick = {
-                    onFormChange(formState.copy(category = existingCat, errorMessage = null))
+                    onFormChange(formState.updateCategory(existingCat))
                     categoryDropdownExpanded = false
                   }
                 )
@@ -1053,7 +1109,7 @@ fun AddEditItemDialog(
               FilterChip(
                 selected = isSelected,
                 onClick = {
-                  onFormChange(formState.copy(category = categoryOption, errorMessage = null))
+                  onFormChange(formState.updateCategory(categoryOption))
                 },
                 label = { Text(categoryOption, style = MaterialTheme.typography.labelSmall) }
               )
@@ -1063,12 +1119,21 @@ fun AddEditItemDialog(
 
         OutlinedTextField(
           value = formState.quantity,
-          onValueChange = { onFormChange(formState.copy(quantity = it, errorMessage = null)) },
+          onValueChange = { onFormChange(formState.updateQuantity(it)) },
           label = { Text("商品数量 (正整数) *") },
           placeholder = { Text("例如：1") },
           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
           singleLine = true,
-          modifier = Modifier.fillMaxWidth()
+          modifier = Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focusState ->
+              if (focusState.isFocused) {
+                val updated = formState.onQuantityFocus()
+                if (updated != formState) {
+                  onFormChange(updated)
+                }
+              }
+            }
         )
 
         OutlinedTextField(

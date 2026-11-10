@@ -111,4 +111,7 @@ erDiagram
 | `groupByCategory(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 将商品按类别（Category）分组聚合，计算各分类商品项数、总件数、临期数与过期数，并将 `"未分类"` 置于末尾 |
 | `computeSummaryStats(items, today)` | `items: List<PurchasedItem>`, `today: LocalDate` | 计算顶部统计卡片数据：总条目数、商品总件数、临期数、已过期数、已填金额总计 |
 | `YearMonthDayPickerModel.fromLocalDate(initialDate)` | `initialDate: LocalDate`, `minYear: Int`, `maxYear: Int` | 生成 **“年”、“月”、“日”三列联动日期选择器** 状态，支持 `selectYear` / `selectMonth` / `selectDay` 及大小月与闰年2月天数自动钳制 |
+| `ItemCardDisplayModel.fromItem(item, isExpanded, today)` | `item: PurchasedItem`, `isExpanded: Boolean`, `today: LocalDate` | 生成商品卡片二级折叠展示模型：默认收起态仅返回名称与剩余/已过期天数，点击展开态返回过期日期、金额、数量与操作项 |
+| `ItemExpansionState.toggleItem(itemId)` / `toggleCategory(category, itemsInCategory)` | `itemId: Long` / `category: String` | 管理大类折叠与单个商品栏详情展开/收起状态（收起大类时自动收起该大类下已展开的商品详情） |
+| `ItemFormState.onCategoryFocus()` / `onQuantityFocus()` | 无 | 新增商品时点击（聚焦）分类或数量输入框，自动将缺省值 `"未分类"` 与 `"1"` 清空为空白字符串 `""` |
 

@@ -71,10 +71,58 @@ data class ItemFormState(
   val amount: String = "",
   val expirationDate: LocalDate = LocalDate.now().plusDays(7),
   val createdAtEpochMillis: Long? = null,
-  val errorMessage: String? = null
+  val errorMessage: String? = null,
+  val isDefaultCategory: Boolean = true,
+  val isDefaultQuantity: Boolean = true
 ) {
   val isEditMode: Boolean
     get() = editingItemId != null && editingItemId > 0L
+
+  /**
+   * 当用户点击（聚焦）“商品分类”输入框时：
+   * 若当前值为缺省值“未分类”，自动清空为空白字符串 `""`，方便直接输入新分类（如同商品名称输入框）。
+   */
+  fun onCategoryFocus(): ItemFormState {
+    return if (isDefaultCategory && category.trim() == PurchasedItem.DEFAULT_CATEGORY) {
+      copy(category = "", isDefaultCategory = false, errorMessage = null)
+    } else {
+      this
+    }
+  }
+
+  /**
+   * 当用户点击（聚焦）“商品数量”输入框时：
+   * 在新增商品模式下，若当前值为初始缺省值 `"1"`，自动清空为空白字符串 `""`，方便直接输入目标数量。
+   */
+  fun onQuantityFocus(): ItemFormState {
+    return if (!isEditMode && isDefaultQuantity && quantity.trim() == "1") {
+      copy(quantity = "", isDefaultQuantity = false, errorMessage = null)
+    } else {
+      this
+    }
+  }
+
+  /**
+   * 用户手动输入或选择分类时更新状态。
+   */
+  fun updateCategory(newCategory: String): ItemFormState {
+    return copy(
+      category = newCategory,
+      isDefaultCategory = newCategory.trim() == PurchasedItem.DEFAULT_CATEGORY,
+      errorMessage = null
+    )
+  }
+
+  /**
+   * 用户手动输入数量时更新状态，并标记为非缺省值（避免再次点击时被清空）。
+   */
+  fun updateQuantity(newQuantity: String): ItemFormState {
+    return copy(
+      quantity = newQuantity,
+      isDefaultQuantity = false,
+      errorMessage = null
+    )
+  }
 
   /**
    * 校验当前表单字段，若不合法则在返回的 [ItemFormState.errorMessage] 中写入错误原因。
@@ -106,7 +154,9 @@ data class ItemFormState(
         amount = "",
         expirationDate = defaultDate,
         createdAtEpochMillis = null,
-        errorMessage = null
+        errorMessage = null,
+        isDefaultCategory = true,
+        isDefaultQuantity = true
       )
     }
 
@@ -120,7 +170,9 @@ data class ItemFormState(
         amount = formattedAmount,
         expirationDate = item.expirationDate,
         createdAtEpochMillis = item.createdAtEpochMillis,
-        errorMessage = null
+        errorMessage = null,
+        isDefaultCategory = item.category.trim() == PurchasedItem.DEFAULT_CATEGORY,
+        isDefaultQuantity = false
       )
     }
   }
