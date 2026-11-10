@@ -125,3 +125,17 @@
 3. **结果如何？**
    - 在 [`AdaptiveLayoutAndFormTest.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/AdaptiveLayoutAndFormTest.kt) 中新增 3 项单元测试，全工程累计 80 项单元测试全部通过。
 
+---
+
+## [2026-11-10] 阶段 9 (Issue #9)：商品分类（大类）默认始终折叠，仅在点击分类标题时展开
+
+1. **遇到了什么问题？**
+   - 用户提出进一步优化要求：主列表中的商品分类（大类）应当**永远默认折叠**，只有当用户点击某个分类标题栏时才展开该分类下的商品列表。原先使用 `collapsedCategories`（黑名单集合）管理分类折叠态，导致初始及新创建的分类默认处于展开态。
+2. **采取了什么技术方案？**
+   - 重构 [`ItemExpansionState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/ItemExpansionState.kt#L13-L68)、[`PurchasedItemUiState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/PurchasedItemViewModel.kt#L23-L39) 与 [`MainScreenContent`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L170-L415)：
+     - 将分类状态由 `collapsedCategories` 改为显式展开白名单 `expandedCategories: Set<String> = emptySet()`。
+     - 无论是已有分类还是后续新添加的商品分类，在未点击前 `isCategoryCollapsed(category)` 恒为 `true`（永远默认折叠）。
+     - 只有用户点击分类标题栏触发 `toggleCategory(category, itemsInCategory)` 时，才将该分类加入 `expandedCategories` 展开显示；再次点击时从 `expandedCategories` 移除并同步收起该分类下已展开的商品详情。
+3. **结果如何？**
+   - 在 [`ItemExpansionStateTest.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/ItemExpansionStateTest.kt) 中补充了针对“所有分类默认折叠，仅点击时展开”及“新增分类默认保持折叠”的单元测试，全工程 82 项单元测试全部通过。
+

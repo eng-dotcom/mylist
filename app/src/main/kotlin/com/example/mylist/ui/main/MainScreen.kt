@@ -197,10 +197,10 @@ fun MainScreenContent(
     localExpansionState.expandedItemIds
   }
 
-  val effectiveCollapsedCategories = if (onToggleCategoryCollapsed != null) {
-    uiState.collapsedCategories
+  val effectiveExpandedCategories = if (onToggleCategoryCollapsed != null) {
+    uiState.expandedCategories
   } else {
-    localExpansionState.collapsedCategories
+    localExpansionState.expandedCategories
   }
 
   val handleToggleItem: (Long) -> Unit = { itemId ->
@@ -362,7 +362,7 @@ fun MainScreenContent(
             ItemQueryEngine.groupByCategory(uiState.items, today)
           }
           groups.forEach { group ->
-            val isCollapsed = effectiveCollapsedCategories.contains(group.category)
+            val isCollapsed = !effectiveExpandedCategories.contains(group.category)
             item(
               key = "category_header_${group.category}",
               span = { GridItemSpan(maxLineSpan) }
