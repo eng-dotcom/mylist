@@ -95,3 +95,33 @@
 3. **结果如何？**
    - 新增 [`YearMonthDayPickerModelTest`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/YearMonthDayPickerModelTest.kt)（6 项单元测试，覆盖三列初始化、年月日联动修改、越界输入安全钳制、大小月切换及平年/闰年 2 月 29 日边界条件），全工程 71 项单元测试全部通过，Debug APK 构建通过。
 
+---
+
+## [2026-11-10] 阶段 7 (Issue #7)：商品列表项默认仅展示名称与剩余/已过期天数，支持点击商品栏展开详情
+
+1. **遇到了什么问题？**
+   - 用户反馈：在已购商品清单列表中，每一大类商品展开时，每个商品卡片直接展示了全部信息（过期日期、金额、数量、加减与编辑删除按钮），导致列表视觉密度过高；期望**默认只展示商品名称和剩余过期天数（或已过期天数）**，其它信息均不展示，**只有点击商品栏才展开**。
+2. **采取了什么技术方案？**
+   - 设计并实现二级折叠状态与展示模型 [`ItemExpansionState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/ItemExpansionState.kt#L13-L64) 与 [`ItemCardDisplayModel`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/ItemExpansionState.kt#L73-L120)：
+     - 默认所有商品处于收起态（`isExpanded = false`），`ItemCardDisplayModel.fromItem` 仅暴露 `name` 与 `expirationBadgeText`（如 `剩余 4 天` / `已过期 2 天`），将 `expirationDateText`、`amountText`、`quantityText` 置为 `null` 且 `showActions = false`。
+     - 当用户点击商品栏触发 `toggleItemExpanded(item.id)` 后，`isExpanded` 变为 `true`，展开展示分类、具体过期日期、购买金额、数量快捷 `−`/`＋` 按钮及编辑/删除按钮；再次点击商品栏即可收起。
+     - 当用户点击大类标题收起某个分类时，`ItemExpansionState.toggleCategory` 自动将该分类下已展开的商品恢复为收起态；当商品被删除时自动从 `expandedItemIds` 中清理。
+   - 重构 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 中的 [`PurchasedItemCard`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt#L756-L916) 组件以绑定 `ItemCardDisplayModel` 与点击展开交互。
+3. **结果如何？**
+   - 新增 [`ItemExpansionStateTest`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/ItemExpansionStateTest.kt)（6 项单元测试，覆盖收起态字段隐藏、展开态详情暴露、独立展开/收起切换、非法ID/空白分类拦截、收起大类自动收起子商品及删除商品清理展开态），全工程 77 项单元测试全部通过。
+
+---
+
+## [2026-11-10] 阶段 8 (Issue #8)：新增商品时点击分类与数量输入框自动清空缺省值（未分类 / 1）
+
+1. **遇到了什么问题？**
+   - 用户反馈：在新增商品弹窗中，商品分类与商品数量输入框带有缺省值（分别为 `"未分类"` 和 `"1"`），当点击输入框准备输入新分类或数量时，原本的缺省值不会自动消失，需要手动退格删除，不如商品名称输入框顺畅。
+2. **采取了什么技术方案？**
+   - 在 [`ItemFormState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt#L66-L180) 中引入 `isDefaultCategory` 与 `isDefaultQuantity` 标识，并实现 [`onCategoryFocus()`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt#L87-L93) 与 [`onQuantityFocus()`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt#L99-L105)：
+     - 当点击（聚焦）分类输入框且当前处于缺省值 `"未分类"` 时，自动清空为 `""`；
+     - 当在新增模式下点击（聚焦）数量输入框且当前处于初始缺省值 `"1"` 时，自动清空为 `""`；
+     - 一旦用户手动输入了分类或数量（哪怕手动输入了 `"1"`），再次点击输入框时保留用户输入，不会误清空。
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 的 `AddEditItemDialog` 中，为分类与数量 `OutlinedTextField` 绑定 `Modifier.onFocusChanged` 实时触发缺省值清空。
+3. **结果如何？**
+   - 在 [`AdaptiveLayoutAndFormTest.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/AdaptiveLayoutAndFormTest.kt) 中新增 3 项单元测试，全工程累计 80 项单元测试全部通过。
+

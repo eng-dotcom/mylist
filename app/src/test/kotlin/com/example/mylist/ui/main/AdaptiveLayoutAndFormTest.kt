@@ -124,5 +124,73 @@ class AdaptiveLayoutAndFormTest {
     val validated = editForm.validate()
     assertNull(validated.errorMessage)
   }
+
+  // ==================== 4. Issue #8：点击分类与数量输入框自动清空缺省值测试 ====================
+
+  @Test
+  fun `onCategoryFocus and onQuantityFocus clear default values to blank for new item`() {
+    val newForm = ItemFormState.forNewItem(defaultDate = sampleDate)
+    assertEquals("未分类", newForm.category)
+    assertEquals("1", newForm.quantity)
+
+    // 点击（聚焦）分类输入框：缺省值 "未分类" 自动变成空白 ""
+    val afterCategoryFocus = newForm.onCategoryFocus()
+    assertEquals("", afterCategoryFocus.category)
+
+    // 点击（聚焦）数量输入框：缺省值 "1" 自动变成空白 ""
+    val afterQuantityFocus = afterCategoryFocus.onQuantityFocus()
+    assertEquals("", afterQuantityFocus.quantity)
+  }
+
+  @Test
+  fun `onCategoryFocus and onQuantityFocus do not overwrite user-entered values`() {
+    val userTypedForm = ItemFormState.forNewItem(defaultDate = sampleDate)
+      .onCategoryFocus()
+      .updateCategory("进口水果")
+      .onQuantityFocus()
+      .updateQuantity("6")
+
+    assertEquals("进口水果", userTypedForm.category)
+    assertEquals("6", userTypedForm.quantity)
+
+    // 再次点击（聚焦）输入框时，用户已输入的内容不会被清空
+    val refocusedForm = userTypedForm
+      .onCategoryFocus()
+      .onQuantityFocus()
+    assertEquals("进口水果", refocusedForm.category)
+    assertEquals("6", refocusedForm.quantity)
+
+    // 即使用户手动输入了 "1"，也不再视为初始缺省值，再次聚焦不会清空
+    val manualOneForm = ItemFormState.forNewItem(defaultDate = sampleDate)
+      .onQuantityFocus()
+      .updateQuantity("1")
+      .onQuantityFocus()
+    assertEquals("1", manualOneForm.quantity)
+  }
+
+  @Test
+  fun `boundary - edit mode preserves existing quantity on focus and blank category normalizes to 未分类`() {
+    val existingItem = PurchasedItem(
+      id = 25L,
+      name = "苏打水",
+      category = "未分类",
+      quantity = 1,
+      amount = 5.0,
+      expirationDate = sampleDate.plusDays(30)
+    )
+    val editForm = ItemFormState.fromExistingItem(existingItem)
+
+    // 编辑已有商品时，数量 "1" 是商品真实库存，聚焦时不自动清空；若分类仍为缺省 "未分类"，聚焦时自动清空便于补录分类
+    val focusedEditForm = editForm.onQuantityFocus().onCategoryFocus()
+    assertEquals("1", focusedEditForm.quantity)
+    assertEquals("", focusedEditForm.category)
+
+    // 边界：新增商品时聚焦分类变成空白 "" 后若未输入新分类直接校验，自动归为 "未分类" 并通过校验
+    val blankCategoryNewForm = ItemFormState.forNewItem(sampleDate)
+      .copy(name = "抽纸")
+      .onCategoryFocus()
+    assertEquals("", blankCategoryNewForm.category)
+    assertNull(blankCategoryNewForm.validate().errorMessage)
+  }
 }
 
