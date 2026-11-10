@@ -25,6 +25,7 @@ class MainScreenTest {
     PurchasedItem(
       id = 1L,
       name = "有机纯牛奶",
+      category = "饮品乳品",
       quantity = 2,
       amount = 25.0,
       expirationDate = sampleToday.plusDays(3)
@@ -57,16 +58,20 @@ class MainScreenTest {
   }
 
   @Test
-  fun itemAndSummaryDashboard_areDisplayed_andDetailsExpandOnClick() {
+  fun categoryIsCollapsedByDefault_andExpandsOnClick_thenItemExpandsOnClick() {
     composeTestRule.onNodeWithText("我的已购商品清单").assertExists()
+
+    // 1. 分类永远默认折叠：商品名称初始不显示
+    composeTestRule.onNodeWithText("有机纯牛奶").assertDoesNotExist()
+
+    // 2. 点击分类标题展开该大类：仅显示商品名称与剩余天数，不显示过期日期与金额
+    composeTestRule.onNodeWithText("1 项 · 共 2 件").performClick()
     composeTestRule.onNodeWithText("有机纯牛奶").assertExists()
     composeTestRule.onNodeWithText("剩余 3 天").assertExists()
-
-    // 默认收起态下不展示过期日期与金额详情
     composeTestRule.onNodeWithText("过期日期：2026-11-12").assertDoesNotExist()
     composeTestRule.onNodeWithText("金额：¥25.00").assertDoesNotExist()
 
-    // 点击商品栏后展开详情
+    // 3. 点击商品栏后展开完整详情
     composeTestRule.onNodeWithText("有机纯牛奶").performClick()
     composeTestRule.onNodeWithText("过期日期：2026-11-12").assertExists()
     composeTestRule.onNodeWithText("金额：¥25.00").assertExists()

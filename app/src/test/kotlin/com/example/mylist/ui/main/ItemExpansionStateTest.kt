@@ -21,17 +21,19 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Issue #7 单元测试：测试商品列表二级折叠与商品栏点击展开详情逻辑（[ItemExpansionState] 与 [ItemCardDisplayModel]）。
+ * Issue #7 & Issue #9 单元测试：测试商品大类默认始终折叠、点击大类展开、以及商品栏点击展开详情的二级折叠逻辑
+ * （[ItemExpansionState] 与 [ItemCardDisplayModel]）。
  * 覆盖：
  * 1. 正向路径：
- *    - 默认收起态仅包含商品名称和剩余/已过期天数，不展示过期日期、金额、数量及操作按钮；
- *    - 点击商品栏切换为展开态后，完整展示过期日期、金额、数量及编辑/删除按钮；
- *    - 再次点击商品栏收起详情；大类标题支持独立折叠/展开。
+ *    - 所有商品大类（Category）永远默认处于折叠态（`isCategoryCollapsed == true`），只有点击时才展开；
+ *    - 大类展开后，商品栏默认收起，仅包含商品名称和剩余/已过期天数，不展示过期日期、金额、数量及操作按钮；
+ *    - 点击商品栏切换为展开态后，完整展示过期日期、金额、数量及编辑/删除按钮。
  * 2. 异常路径：
  *    - 对非法商品 ID（<= 0）或空白分类名执行展开/折叠切换时安全忽略，不污染状态。
  * 3. 边界条件：
- *    - 当某个已展开的商品被删除时，自动从 expandedItemIds 中清理；
- *    - 当某个大类被收起时，该大类下已展开的商品自动收起，避免再次展开大类时残留旧展开态。
+ *    - 当某个已展开的大类再次被点击收起时，该大类下已展开的商品自动收起；
+ *    - 新增自定义分类商品后，新分类依然保持默认折叠态，直到用户主动点击该分类；
+ *    - 当某个已展开的商品被删除时，自动从 expandedItemIds 中清理。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class ItemExpansionStateTest {
@@ -50,6 +52,28 @@ class ItemExpansionStateTest {
   }
 
   // ==================== 1. 正向路径测试 ====================
+
+  @Test
+  fun `categories are always collapsed by default and only expand when clicked`() {
+    var state = ItemExpansionState()
+
+    // 任意分类默认始终处于折叠态
+    assertTrue(state.isCategoryCollapsed("饮品乳品"))
+    assertFalse(state.isCategoryExpanded("饮品乳品"))
+    assertTrue(state.isCategoryCollapsed("食品生鲜"))
+    assertTrue(state.isCategoryCollapsed("未分类"))
+
+    // 点击“饮品乳品”分类后，该分类展开，其它分类仍然保持默认折叠
+    state = state.toggleCategory("饮品乳品")
+    assertFalse(state.isCategoryCollapsed("饮品乳品"))
+    assertTrue(state.isCategoryExpanded("饮品乳品"))
+    assertTrue(state.isCategoryCollapsed("食品生鲜"))
+
+    // 再次点击“饮品乳品”分类后，重新收起为折叠态
+    state = state.toggleCategory("饮品乳品")
+    assertTrue(state.isCategoryCollapsed("饮品乳品"))
+    assertFalse(state.isCategoryExpanded("饮品乳品"))
+  }
 
   @Test
   fun `collapsed item card display model only exposes name and remaining or expired days`() {
@@ -142,13 +166,13 @@ class ItemExpansionStateTest {
     assertTrue(afterInvalidId.expandedItemIds.isEmpty())
 
     val afterBlankCategory = initial.toggleCategory("").toggleCategory("   ")
-    assertTrue(afterBlankCategory.collapsedCategories.isEmpty())
+    assertTrue(afterBlankCategory.expandedCategories.isEmpty())
   }
 
   // ==================== 3. 边界条件测试 ====================
 
   @Test
-  fun `boundary - collapsing a category automatically collapses expanded items in that category`() {
+  fun `boundary - collapsing an expanded category automatically collapses expanded items in that category`() {
     val itemInDairy = PurchasedItem(
       id = 10L,
       name = "酸奶",
@@ -164,19 +188,26 @@ class ItemExpansionStateTest {
       expirationDate = today.plusDays(6)
     )
 
+    // 先点击展开两个大类，并点击展开各自的单个商品详情
     var state = ItemExpansionState()
+      .toggleCategory("饮品乳品", listOf(itemInDairy.id))
+      .toggleCategory("食品生鲜", listOf(itemInFood.id))
       .toggleItem(itemInDairy.id)
       .toggleItem(itemInFood.id)
+
+    assertFalse(state.isCategoryCollapsed("饮品乳品"))
+    assertFalse(state.isCategoryCollapsed("食品生鲜"))
     assertTrue(state.isItemExpanded(10L))
     assertTrue(state.isItemExpanded(20L))
 
-    // 收起“饮品乳品”大类时，该大类下的商品 10L 自动收起，而“食品生鲜”下的商品 20L 保持原状
+    // 再次点击“饮品乳品”大类将其收起时，该大类下的商品 10L 自动收起，而“食品生鲜”下的商品 20L 保持展开
     state = state.toggleCategory(
       category = "饮品乳品",
       itemsInCategory = listOf(itemInDairy.id)
     )
     assertTrue(state.isCategoryCollapsed("饮品乳品"))
     assertFalse(state.isItemExpanded(10L))
+    assertFalse(state.isCategoryCollapsed("食品生鲜"))
     assertTrue(state.isItemExpanded(20L))
 
     // 再次点击“饮品乳品”大类展开时，商品 10L 处于默认只显示名称和过期天数的收起态
@@ -186,6 +217,31 @@ class ItemExpansionStateTest {
     )
     assertFalse(state.isCategoryCollapsed("饮品乳品"))
     assertFalse(state.isItemExpanded(10L))
+  }
+
+  @Test
+  fun `boundary - newly added categories in ViewModel remain collapsed by default until clicked`() = runTest {
+    val repository = DefaultPurchasedItemRepository(InMemoryPurchasedItemDao())
+    val viewModel = PurchasedItemViewModel(repository = repository, todayProvider = { today })
+
+    viewModel.addItem(
+      rawName = "猫罐头",
+      rawCategory = "宠物专享",
+      rawQuantity = "6",
+      rawAmount = "45.0",
+      expirationDate = today.plusDays(60)
+    )
+
+    // 新增分类在初始状态下默认折叠（expandedCategories 不包含它）
+    assertFalse(viewModel.uiState.value.expandedCategories.contains("宠物专享"))
+
+    // 用户点击该分类标题后才展开
+    viewModel.toggleCategoryCollapsed("宠物专享")
+    assertTrue(viewModel.uiState.value.expandedCategories.contains("宠物专享"))
+
+    // 再次点击该分类标题收起
+    viewModel.toggleCategoryCollapsed("宠物专享")
+    assertFalse(viewModel.uiState.value.expandedCategories.contains("宠物专享"))
   }
 
   @Test
@@ -202,14 +258,11 @@ class ItemExpansionStateTest {
     )
 
     val addedItem = viewModel.uiState.value.items.first()
-    // 默认不展开
     assertFalse(viewModel.uiState.value.expandedItemIds.contains(addedItem.id))
 
-    // 点击展开该商品
     viewModel.toggleItemExpanded(addedItem.id)
     assertTrue(viewModel.uiState.value.expandedItemIds.contains(addedItem.id))
 
-    // 验证未填金额商品在展开态下显示“未填金额”
     val expandedNoAmountModel = ItemCardDisplayModel.fromItem(
       item = addedItem,
       isExpanded = true,
@@ -218,9 +271,7 @@ class ItemExpansionStateTest {
     assertNotNull(expandedNoAmountModel.amountText)
     assertEquals("未填金额", expandedNoAmountModel.amountText)
 
-    // 删除该商品后，其 ID 从 expandedItemIds 中自动移除
     viewModel.deleteItem(addedItem)
     assertFalse(viewModel.uiState.value.expandedItemIds.contains(addedItem.id))
   }
 }
-

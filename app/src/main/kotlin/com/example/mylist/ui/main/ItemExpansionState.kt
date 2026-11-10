@@ -7,18 +7,21 @@ import java.time.format.DateTimeFormatter
 
 /**
  * 已购商品列表的二级折叠/展开状态模型：
- * 1. 管理每一大类（Category）的折叠/展开状态（[collapsedCategories]）；
- * 2. 管理每个商品栏（PurchasedItem）的详情展开/收起状态（[expandedItemIds]），默认全部收起。
+ * 1. 管理每一大类（Category）的展开状态（[expandedCategories]），**默认全部折叠**，只有点击大类标题时才展开；
+ * 2. 管理每个商品栏（PurchasedItem）的详情展开/收起状态（[expandedItemIds]），**默认全部收起**，只有点击商品栏时才展开。
  */
 data class ItemExpansionState(
   val expandedItemIds: Set<Long> = emptySet(),
-  val collapsedCategories: Set<String> = emptySet()
+  val expandedCategories: Set<String> = emptySet()
 ) {
   /** 判断指定商品栏是否处于详情展开态（默认 false，仅展示名称和剩余/已过期天数） */
   fun isItemExpanded(itemId: Long): Boolean = expandedItemIds.contains(itemId)
 
-  /** 判断指定大类是否处于折叠收起态（默认 false，即大类默认展开） */
-  fun isCategoryCollapsed(category: String): Boolean = collapsedCategories.contains(category.trim())
+  /** 判断指定大类是否处于展开态（默认 false，即大类永远默认折叠） */
+  fun isCategoryExpanded(category: String): Boolean = expandedCategories.contains(category.trim())
+
+  /** 判断指定大类是否处于折叠收起态（默认 true，只有点击后才变为 false） */
+  fun isCategoryCollapsed(category: String): Boolean = !isCategoryExpanded(category)
 
   /**
    * 点击商品栏切换该商品详情的展开/收起状态。
@@ -44,7 +47,7 @@ data class ItemExpansionState(
 
   /**
    * 点击大类标题切换该分类的折叠/展开状态。
-   * 当收起某个大类时，自动将该大类下已展开的商品收起，保证再次展开大类时商品恢复紧凑展示。
+   * 当收起某个已展开的大类时，自动将该大类下已展开的商品收起，保证再次展开大类时商品恢复紧凑展示。
    */
   fun toggleCategory(
     category: String,
@@ -52,13 +55,13 @@ data class ItemExpansionState(
   ): ItemExpansionState {
     val trimmed = category.trim()
     if (trimmed.isEmpty()) return this
-    return if (collapsedCategories.contains(trimmed)) {
-      copy(collapsedCategories = collapsedCategories - trimmed)
-    } else {
+    return if (expandedCategories.contains(trimmed)) {
       copy(
-        collapsedCategories = collapsedCategories + trimmed,
+        expandedCategories = expandedCategories - trimmed,
         expandedItemIds = expandedItemIds - itemsInCategory.toSet()
       )
+    } else {
+      copy(expandedCategories = expandedCategories + trimmed)
     }
   }
 }
