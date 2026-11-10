@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import com.example.mylist.domain.model.PurchasedItem
 import com.example.mylist.domain.query.ItemQueryEngine
 import com.example.mylist.ui.theme.MyListTheme
@@ -56,9 +57,18 @@ class MainScreenTest {
   }
 
   @Test
-  fun itemAndSummaryDashboard_areDisplayed() {
+  fun itemAndSummaryDashboard_areDisplayed_andDetailsExpandOnClick() {
     composeTestRule.onNodeWithText("我的已购商品清单").assertExists()
     composeTestRule.onNodeWithText("有机纯牛奶").assertExists()
     composeTestRule.onNodeWithText("剩余 3 天").assertExists()
+
+    // 默认收起态下不展示过期日期与金额详情
+    composeTestRule.onNodeWithText("过期日期：2026-11-12").assertDoesNotExist()
+    composeTestRule.onNodeWithText("金额：¥25.00").assertDoesNotExist()
+
+    // 点击商品栏后展开详情
+    composeTestRule.onNodeWithText("有机纯牛奶").performClick()
+    composeTestRule.onNodeWithText("过期日期：2026-11-12").assertExists()
+    composeTestRule.onNodeWithText("金额：¥25.00").assertExists()
   }
 }
