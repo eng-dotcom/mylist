@@ -24,6 +24,8 @@ data class PurchasedItemUiState(
   val items: List<PurchasedItem> = emptyList(),
   val categoryGroups: List<CategoryGroup> = ItemQueryEngine.groupByCategory(items),
   val isGroupedByCategory: Boolean = true,
+  val expandedItemIds: Set<Long> = emptySet(),
+  val collapsedCategories: Set<String> = emptySet(),
   val allItemsCount: Int = 0,
   val searchQuery: String = "",
   val selectedCategory: String? = null,
@@ -47,6 +49,7 @@ class PurchasedItemViewModel(
   private val searchQueryFlow = MutableStateFlow("")
   private val categoryFilterFlow = MutableStateFlow<String?>(null)
   private val groupByCategoryFlow = MutableStateFlow(true)
+  private val expansionStateFlow = MutableStateFlow(ItemExpansionState())
   private val statusFilterFlow = MutableStateFlow(StatusFilter.ALL)
   private val sortOptionFlow = MutableStateFlow(SortOption.EXPIRATION_ASC)
   private val pendingUndoFlow = MutableStateFlow<PurchasedItem?>(null)
@@ -62,10 +65,10 @@ class PurchasedItemViewModel(
         combine(searchQueryFlow, categoryFilterFlow, groupByCategoryFlow) { q, cat, grouped ->
           Triple(q, cat, grouped)
         },
-        statusFilterFlow,
-        sortOptionFlow,
+        combine(statusFilterFlow, sortOptionFlow) { filter, sort -> filter to sort },
+        expansionStateFlow,
         combine(pendingUndoFlow, errorFlow) { undo, err -> undo to err }
-      ) { allItems, (query, categoryFilter, isGrouped), filter, sort, (undoItem, errorMsg) ->
+      ) { allItems, (query, categoryFilter, isGrouped), (filter, sort), expansionState, (undoItem, errorMsg) ->
         val today = todayProvider()
         val availableCategories = ItemQueryEngine.extractAvailableCategories(
           items = allItems,
@@ -91,6 +94,8 @@ class PurchasedItemViewModel(
           items = filteredAndSorted,
           categoryGroups = categoryGroups,
           isGroupedByCategory = isGrouped,
+          expandedItemIds = expansionState.expandedItemIds,
+          collapsedCategories = expansionState.collapsedCategories,
           allItemsCount = allItems.size,
           searchQuery = query,
           selectedCategory = categoryFilter,
@@ -122,6 +127,26 @@ class PurchasedItemViewModel(
 
   fun setGroupByCategory(grouped: Boolean) {
     groupByCategoryFlow.value = grouped
+  }
+
+  /**
+   * 点击某个商品栏时，切换该商品详情区（过期日期、金额、数量、操作按钮）的展开/收起状态。
+   */
+  fun toggleItemExpanded(itemId: Long) {
+    expansionStateFlow.value = expansionStateFlow.value.toggleItem(itemId)
+  }
+
+  /**
+   * 点击某个大类标题栏时，切换该大类的折叠/展开状态；若收起大类则同时收起该大类下已展开的商品详情。
+   */
+  fun toggleCategoryCollapsed(category: String) {
+    val itemIdsInCategory = _uiState.value.items
+      .filter { it.category.equals(category.trim(), ignoreCase = true) }
+      .map { it.id }
+    expansionStateFlow.value = expansionStateFlow.value.toggleCategory(
+      category = category,
+      itemsInCategory = itemIdsInCategory
+    )
   }
 
   fun updateStatusFilter(filter: StatusFilter) {
@@ -244,6 +269,7 @@ class PurchasedItemViewModel(
    * 删除商品并记录待撤销状态以弹出底部 Snackbar。
    */
   fun deleteItem(item: PurchasedItem) {
+    expansionStateFlow.value = expansionStateFlow.value.removeItem(item.id)
     viewModelScope.launch {
       repository.deleteItem(item)
         .onSuccess {
