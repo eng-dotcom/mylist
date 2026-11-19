@@ -139,3 +139,16 @@
 3. **结果如何？**
    - 在 [`ItemExpansionStateTest.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/ui/main/ItemExpansionStateTest.kt) 中补充了针对“所有分类默认折叠，仅点击时展开”及“新增分类默认保持折叠”的单元测试，全工程 82 项单元测试全部通过。
 
+---
+
+## [2026-11-19] 阶段 10 (Issue #10)：支持输入生产日期和保质期自动计算过期日期，并保留直接输入过期日期
+
+1. **遇到了什么问题？**
+   - 用户提出新需求：许多商品包装上只标注了**生产日期**和**保质期**（例如“生产日期 2026-11-01，保质期 6 个月 / 180 天”），原先只支持直接选择过期日期，用户需要自己心算过期日；因此需要增加“输入生产日期 + 保质期自动计算过期日期”模式，同时完整保留原有的“直接输入过期日期”模式。
+2. **采取了什么技术方案？**
+   - 新增领域计算与校验器 [`ExpirationCalculator`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/model/ExpirationCalculator.kt)，定义 [`ExpirationInputMode`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/model/ExpirationCalculator.kt#L10-L13)（`DIRECT_EXPIRATION` 直接输入过期日、`PRODUCTION_AND_SHELF_LIFE` 生产日期 + 保质期）与 [`ShelfLifeUnit`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/domain/model/ExpirationCalculator.kt#L18-L22)（`DAYS` 天、`MONTHS` 个月、`YEARS` 年），支持按天/月/年精确计算过期日期并处理跨月底与闰年边界。
+   - 在 [`ItemFormState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt#L68-L295) 中扩展双模式状态联动（`switchExpirationInputMode`、`updateProductionDate`、`updateShelfLifeValue`、`updateShelfLifeUnit`、`applyShelfLifePreset`、`onShelfLifeFocus`），任意修改生产日期、保质期数值或单位时实时自动更新 `expirationDate`；点击保质期输入框时同样自动清空初始缺省值 `"7"` 为空白 `""`。
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 的 `AddEditItemDialog` 中提供“直接输入过期日 / 生产日期 + 保质期”切换开关、生产日期【年/月/日】三列选择器、保质期时长输入与天/月/年单位选择、常用保质期快捷预设芯片（`7天`~`2年`）及自动计算过期日期实时预览卡片。
+3. **结果如何？**
+   - 新增 [`ExpirationCalculatorTest`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/domain/ExpirationCalculatorTest.kt)（7 项单元测试，覆盖天/月/年正向计算、表单双模式联动、保质期焦点清空、非法/越界保质期异常拦截、跨月底与闰年边界及模式往返保留过期日），全工程 89 项单元测试全部通过。
+
