@@ -114,4 +114,5 @@ erDiagram
 | `ItemCardDisplayModel.fromItem(item, isExpanded, today)` | `item: PurchasedItem`, `isExpanded: Boolean`, `today: LocalDate` | 生成商品卡片二级折叠展示模型：默认收起态仅返回名称与剩余/已过期天数，点击展开态返回过期日期、金额、数量与操作项 |
 | `ItemExpansionState.toggleItem(itemId)` / `toggleCategory(category, itemsInCategory)` | `itemId: Long` / `category: String` | 管理大类默认折叠（仅点击后加入 `expandedCategories` 展开）与单个商品栏详情展开/收起状态（收起大类时自动收起该大类下已展开的商品详情） |
 | `ItemFormState.onCategoryFocus()` / `onQuantityFocus()` | 无 | 新增商品时点击（聚焦）分类或数量输入框，自动将缺省值 `"未分类"` 与 `"1"` 清空为空白字符串 `""` |
+| `ExpirationCalculator.calculateExpirationDate(productionDate, shelfLifeValue, unit)` | `productionDate: LocalDate`, `shelfLifeValue: Int`, `unit: ShelfLifeUnit` (`DAYS`/`MONTHS`/`YEARS`) | 根据生产日期与保质期（天/个月/年）自动计算过期日期，同时保留直接输入过期日期模式 |
 

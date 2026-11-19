@@ -1,6 +1,9 @@
 package com.example.mylist.ui.main
 
+import com.example.mylist.domain.model.ExpirationCalculator
+import com.example.mylist.domain.model.ExpirationInputMode
 import com.example.mylist.domain.model.PurchasedItem
+import com.example.mylist.domain.model.ShelfLifeUnit
 import com.example.mylist.domain.validation.PurchasedItemValidator
 import java.time.LocalDate
 import java.util.Locale
@@ -62,6 +65,9 @@ data class AdaptiveLayoutConfig(
 
 /**
  * 新增 / 编辑商品弹窗表单状态模型。
+ * 支持两种过期日期录入方式：
+ * 1. [ExpirationInputMode.DIRECT_EXPIRATION]：直接选择过期日期（保留原有方式）；
+ * 2. [ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE]：输入生产日期 + 保质期（天/月/年）自动计算过期日期。
  */
 data class ItemFormState(
   val editingItemId: Long? = null,
@@ -70,10 +76,15 @@ data class ItemFormState(
   val quantity: String = "1",
   val amount: String = "",
   val expirationDate: LocalDate = LocalDate.now().plusDays(7),
+  val expirationInputMode: ExpirationInputMode = ExpirationInputMode.DIRECT_EXPIRATION,
+  val productionDate: LocalDate = LocalDate.now(),
+  val shelfLifeValue: String = "7",
+  val shelfLifeUnit: ShelfLifeUnit = ShelfLifeUnit.DAYS,
   val createdAtEpochMillis: Long? = null,
   val errorMessage: String? = null,
   val isDefaultCategory: Boolean = true,
-  val isDefaultQuantity: Boolean = true
+  val isDefaultQuantity: Boolean = true,
+  val isDefaultShelfLife: Boolean = true
 ) {
   val isEditMode: Boolean
     get() = editingItemId != null && editingItemId > 0L
@@ -103,6 +114,18 @@ data class ItemFormState(
   }
 
   /**
+   * 当用户点击（聚焦）“保质期”输入框时：
+   * 若当前值为初始缺省值 `"7"`，自动清空为空白字符串 `""`，方便直接输入保质期数值。
+   */
+  fun onShelfLifeFocus(): ItemFormState {
+    return if (isDefaultShelfLife && shelfLifeValue.trim() == "7") {
+      copy(shelfLifeValue = "", isDefaultShelfLife = false, errorMessage = null)
+    } else {
+      this
+    }
+  }
+
+  /**
    * 用户手动输入或选择分类时更新状态。
    */
   fun updateCategory(newCategory: String): ItemFormState {
@@ -125,27 +148,145 @@ data class ItemFormState(
   }
 
   /**
+   * 切换过期日期录入方式（直接输入过期日 / 生产日期 + 保质期自动计算）。
+   */
+  fun switchExpirationInputMode(mode: ExpirationInputMode): ItemFormState {
+    if (mode == expirationInputMode) return this
+    return if (mode == ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE) {
+      val calc = ExpirationCalculator.validateAndCalculate(
+        productionDate = productionDate,
+        rawShelfLife = shelfLifeValue,
+        unit = shelfLifeUnit
+      )
+      copy(
+        expirationInputMode = mode,
+        expirationDate = calc.getOrNull() ?: expirationDate,
+        errorMessage = null
+      )
+    } else {
+      copy(
+        expirationInputMode = mode,
+        errorMessage = null
+      )
+    }
+  }
+
+  /**
+   * 直接修改过期日期（保留原有直接选择过期日期方式）。
+   */
+  fun updateDirectExpirationDate(newExpirationDate: LocalDate): ItemFormState {
+    return copy(
+      expirationDate = newExpirationDate,
+      errorMessage = null
+    )
+  }
+
+  /**
+   * 更新生产日期，并在保质期合法时自动重新计算过期日期。
+   */
+  fun updateProductionDate(newProductionDate: LocalDate): ItemFormState {
+    val calc = ExpirationCalculator.validateAndCalculate(
+      productionDate = newProductionDate,
+      rawShelfLife = shelfLifeValue,
+      unit = shelfLifeUnit
+    )
+    return copy(
+      productionDate = newProductionDate,
+      expirationDate = calc.getOrNull() ?: expirationDate,
+      errorMessage = null
+    )
+  }
+
+  /**
+   * 更新保质期时长字符串，并在合法时自动重新计算过期日期。
+   */
+  fun updateShelfLifeValue(newValue: String): ItemFormState {
+    val calc = ExpirationCalculator.validateAndCalculate(
+      productionDate = productionDate,
+      rawShelfLife = newValue,
+      unit = shelfLifeUnit
+    )
+    return copy(
+      shelfLifeValue = newValue,
+      isDefaultShelfLife = false,
+      expirationDate = calc.getOrNull() ?: expirationDate,
+      errorMessage = null
+    )
+  }
+
+  /**
+   * 更新保质期单位（天 / 个月 / 年），并在保质期数值合法时自动重新计算过期日期。
+   */
+  fun updateShelfLifeUnit(newUnit: ShelfLifeUnit): ItemFormState {
+    val calc = ExpirationCalculator.validateAndCalculate(
+      productionDate = productionDate,
+      rawShelfLife = shelfLifeValue,
+      unit = newUnit
+    )
+    return copy(
+      shelfLifeUnit = newUnit,
+      expirationDate = calc.getOrNull() ?: expirationDate,
+      errorMessage = null
+    )
+  }
+
+  /**
+   * 一键应用常用保质期快捷预设（如 7天、30天、6个月、12个月 等）并自动计算过期日期。
+   */
+  fun applyShelfLifePreset(value: Int, unit: ShelfLifeUnit): ItemFormState {
+    val newExpiration = ExpirationCalculator.calculateExpirationDate(
+      productionDate = productionDate,
+      shelfLifeValue = value,
+      unit = unit
+    )
+    return copy(
+      shelfLifeValue = value.toString(),
+      shelfLifeUnit = unit,
+      isDefaultShelfLife = false,
+      expirationDate = newExpiration,
+      errorMessage = null
+    )
+  }
+
+  /**
    * 校验当前表单字段，若不合法则在返回的 [ItemFormState.errorMessage] 中写入错误原因。
    */
   fun validate(): ItemFormState {
+    val resolvedExpirationDate = if (expirationInputMode == ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE) {
+      val calcResult = ExpirationCalculator.validateAndCalculate(
+        productionDate = productionDate,
+        rawShelfLife = shelfLifeValue,
+        unit = shelfLifeUnit
+      )
+      if (!calcResult.isSuccess) {
+        return copy(errorMessage = calcResult.errorMessage)
+      }
+      calcResult.getOrNull()!!
+    } else {
+      expirationDate
+    }
+
     val result = PurchasedItemValidator.validateAndCreate(
       id = editingItemId ?: 0L,
       rawName = name,
       rawCategory = category,
       rawQuantity = quantity,
       rawAmount = amount,
-      expirationDate = expirationDate,
+      expirationDate = resolvedExpirationDate,
       createdAtEpochMillis = createdAtEpochMillis
     )
     return if (result.isSuccess) {
-      copy(errorMessage = null)
+      copy(expirationDate = resolvedExpirationDate, errorMessage = null)
     } else {
       copy(errorMessage = result.errorMessage)
     }
   }
 
   companion object {
-    fun forNewItem(defaultDate: LocalDate = LocalDate.now().plusDays(7)): ItemFormState {
+    fun forNewItem(
+      defaultDate: LocalDate = LocalDate.now().plusDays(7),
+      defaultProductionDate: LocalDate = LocalDate.now()
+    ): ItemFormState {
       return ItemFormState(
         editingItemId = null,
         name = "",
@@ -153,14 +294,22 @@ data class ItemFormState(
         quantity = "1",
         amount = "",
         expirationDate = defaultDate,
+        expirationInputMode = ExpirationInputMode.DIRECT_EXPIRATION,
+        productionDate = defaultProductionDate,
+        shelfLifeValue = "7",
+        shelfLifeUnit = ShelfLifeUnit.DAYS,
         createdAtEpochMillis = null,
         errorMessage = null,
         isDefaultCategory = true,
-        isDefaultQuantity = true
+        isDefaultQuantity = true,
+        isDefaultShelfLife = true
       )
     }
 
-    fun fromExistingItem(item: PurchasedItem): ItemFormState {
+    fun fromExistingItem(
+      item: PurchasedItem,
+      defaultProductionDate: LocalDate = LocalDate.now()
+    ): ItemFormState {
       val formattedAmount = item.amount?.let { String.format(Locale.US, "%.2f", it) }.orEmpty()
       return ItemFormState(
         editingItemId = item.id,
@@ -169,10 +318,15 @@ data class ItemFormState(
         quantity = item.quantity.toString(),
         amount = formattedAmount,
         expirationDate = item.expirationDate,
+        expirationInputMode = ExpirationInputMode.DIRECT_EXPIRATION,
+        productionDate = defaultProductionDate,
+        shelfLifeValue = "7",
+        shelfLifeUnit = ShelfLifeUnit.DAYS,
         createdAtEpochMillis = item.createdAtEpochMillis,
         errorMessage = null,
         isDefaultCategory = item.category.trim() == PurchasedItem.DEFAULT_CATEGORY,
-        isDefaultQuantity = false
+        isDefaultQuantity = false,
+        isDefaultShelfLife = true
       )
     }
   }
