@@ -84,7 +84,9 @@ data class ItemFormState(
   val errorMessage: String? = null,
   val isDefaultCategory: Boolean = true,
   val isDefaultQuantity: Boolean = true,
-  val isDefaultShelfLife: Boolean = true
+  val isDefaultShelfLife: Boolean = true,
+  val hasEditedQuantity: Boolean = false,
+  val hasEditedShelfLife: Boolean = false
 ) {
   val isEditMode: Boolean
     get() = editingItemId != null && editingItemId > 0L
@@ -96,6 +98,17 @@ data class ItemFormState(
   fun onCategoryFocus(): ItemFormState {
     return if (isDefaultCategory && category.trim() == PurchasedItem.DEFAULT_CATEGORY) {
       copy(category = "", isDefaultCategory = false, errorMessage = null)
+    } else {
+      this
+    }
+  }
+
+  /**
+   * 当“商品分类”输入框失去焦点且用户未输入任何字符时，恢复显示缺省分类“未分类”。
+   */
+  fun onCategoryBlur(): ItemFormState {
+    return if (category.isBlank()) {
+      copy(category = PurchasedItem.DEFAULT_CATEGORY, isDefaultCategory = true)
     } else {
       this
     }
@@ -114,12 +127,43 @@ data class ItemFormState(
   }
 
   /**
+   * 当“商品数量”输入框失去焦点且用户未曾手动输入过数量时，自动恢复初始缺省值 `"1"`，防止失焦后无法提交。
+   */
+  fun onQuantityBlur(): ItemFormState {
+    return if (!isEditMode && !hasEditedQuantity && quantity.isBlank()) {
+      copy(quantity = "1", isDefaultQuantity = true)
+    } else {
+      this
+    }
+  }
+
+  /**
    * 当用户点击（聚焦）“保质期”输入框时：
    * 若当前值为初始缺省值 `"7"`，自动清空为空白字符串 `""`，方便直接输入保质期数值。
    */
   fun onShelfLifeFocus(): ItemFormState {
     return if (isDefaultShelfLife && shelfLifeValue.trim() == "7") {
       copy(shelfLifeValue = "", isDefaultShelfLife = false, errorMessage = null)
+    } else {
+      this
+    }
+  }
+
+  /**
+   * 当“保质期”输入框失去焦点且用户未曾手动输入过保质期时，自动恢复初始缺省值 `"7"`。
+   */
+  fun onShelfLifeBlur(): ItemFormState {
+    return if (!hasEditedShelfLife && shelfLifeValue.isBlank()) {
+      val calc = ExpirationCalculator.validateAndCalculate(
+        productionDate = productionDate,
+        rawShelfLife = "7",
+        unit = shelfLifeUnit
+      )
+      copy(
+        shelfLifeValue = "7",
+        isDefaultShelfLife = true,
+        expirationDate = calc.getOrNull() ?: expirationDate
+      )
     } else {
       this
     }
@@ -137,12 +181,13 @@ data class ItemFormState(
   }
 
   /**
-   * 用户手动输入数量时更新状态，并标记为非缺省值（避免再次点击时被清空）。
+   * 用户手动输入数量时更新状态，并标记为已手动编辑（避免再次点击时被清空）。
    */
   fun updateQuantity(newQuantity: String): ItemFormState {
     return copy(
       quantity = newQuantity,
       isDefaultQuantity = false,
+      hasEditedQuantity = true,
       errorMessage = null
     )
   }
@@ -153,13 +198,15 @@ data class ItemFormState(
   fun switchExpirationInputMode(mode: ExpirationInputMode): ItemFormState {
     if (mode == expirationInputMode) return this
     return if (mode == ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE) {
+      val effectiveShelfLife = if (!hasEditedShelfLife && shelfLifeValue.isBlank()) "7" else shelfLifeValue
       val calc = ExpirationCalculator.validateAndCalculate(
         productionDate = productionDate,
-        rawShelfLife = shelfLifeValue,
+        rawShelfLife = effectiveShelfLife,
         unit = shelfLifeUnit
       )
       copy(
         expirationInputMode = mode,
+        shelfLifeValue = effectiveShelfLife,
         expirationDate = calc.getOrNull() ?: expirationDate,
         errorMessage = null
       )
@@ -185,9 +232,10 @@ data class ItemFormState(
    * 更新生产日期，并在保质期合法时自动重新计算过期日期。
    */
   fun updateProductionDate(newProductionDate: LocalDate): ItemFormState {
+    val effectiveShelfLife = if (!hasEditedShelfLife && shelfLifeValue.isBlank()) "7" else shelfLifeValue
     val calc = ExpirationCalculator.validateAndCalculate(
       productionDate = newProductionDate,
-      rawShelfLife = shelfLifeValue,
+      rawShelfLife = effectiveShelfLife,
       unit = shelfLifeUnit
     )
     return copy(
@@ -209,6 +257,7 @@ data class ItemFormState(
     return copy(
       shelfLifeValue = newValue,
       isDefaultShelfLife = false,
+      hasEditedShelfLife = true,
       expirationDate = calc.getOrNull() ?: expirationDate,
       errorMessage = null
     )
@@ -218,9 +267,10 @@ data class ItemFormState(
    * 更新保质期单位（天 / 个月 / 年），并在保质期数值合法时自动重新计算过期日期。
    */
   fun updateShelfLifeUnit(newUnit: ShelfLifeUnit): ItemFormState {
+    val effectiveShelfLife = if (!hasEditedShelfLife && shelfLifeValue.isBlank()) "7" else shelfLifeValue
     val calc = ExpirationCalculator.validateAndCalculate(
       productionDate = productionDate,
-      rawShelfLife = shelfLifeValue,
+      rawShelfLife = effectiveShelfLife,
       unit = newUnit
     )
     return copy(
@@ -243,6 +293,7 @@ data class ItemFormState(
       shelfLifeValue = value.toString(),
       shelfLifeUnit = unit,
       isDefaultShelfLife = false,
+      hasEditedShelfLife = true,
       expirationDate = newExpiration,
       errorMessage = null
     )
@@ -252,10 +303,21 @@ data class ItemFormState(
    * 校验当前表单字段，若不合法则在返回的 [ItemFormState.errorMessage] 中写入错误原因。
    */
   fun validate(): ItemFormState {
+    val effectiveQuantity = if (!isEditMode && !hasEditedQuantity && quantity.isBlank()) {
+      "1"
+    } else {
+      quantity
+    }
+    val effectiveShelfLife = if (!hasEditedShelfLife && shelfLifeValue.isBlank()) {
+      "7"
+    } else {
+      shelfLifeValue
+    }
+
     val resolvedExpirationDate = if (expirationInputMode == ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE) {
       val calcResult = ExpirationCalculator.validateAndCalculate(
         productionDate = productionDate,
-        rawShelfLife = shelfLifeValue,
+        rawShelfLife = effectiveShelfLife,
         unit = shelfLifeUnit
       )
       if (!calcResult.isSuccess) {
@@ -270,13 +332,20 @@ data class ItemFormState(
       id = editingItemId ?: 0L,
       rawName = name,
       rawCategory = category,
-      rawQuantity = quantity,
+      rawQuantity = effectiveQuantity,
       rawAmount = amount,
       expirationDate = resolvedExpirationDate,
       createdAtEpochMillis = createdAtEpochMillis
     )
     return if (result.isSuccess) {
-      copy(expirationDate = resolvedExpirationDate, errorMessage = null)
+      val validItem = result.getOrNull()!!
+      copy(
+        category = validItem.category,
+        quantity = effectiveQuantity,
+        shelfLifeValue = effectiveShelfLife,
+        expirationDate = resolvedExpirationDate,
+        errorMessage = null
+      )
     } else {
       copy(errorMessage = result.errorMessage)
     }

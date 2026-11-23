@@ -152,3 +152,22 @@
 3. **结果如何？**
    - 新增 [`ExpirationCalculatorTest`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/domain/ExpirationCalculatorTest.kt)（7 项单元测试，覆盖天/月/年正向计算、表单双模式联动、保质期焦点清空、非法/越界保质期异常拦截、跨月底与闰年边界及模式往返保留过期日），全工程 89 项单元测试全部通过。
 
+---
+
+## [2026-11-23] 阶段 11 (Issue #11)：商品数量与金额并列显示，并修复输入生产日期和保质期时无法提交的 Bug
+
+1. **遇到了什么问题？**
+   - 用户反馈两个问题：
+     1. 新增/编辑商品弹窗中，「商品数量」和「购买金额」上下分行排列占用较多纵向空间，导致下方的生产日期与保质期输入区域位置偏下，期望将数量和金额并列显示。
+     2. 在「生产日期 + 保质期」模式下直接输入生产日期和保质期后，点击确认无法提交。经排查根因有二：
+        - `MainScreen.kt` 的 `onConfirm` 回调在调用 `currentForm.validate()` 得到含最新计算出的 `expirationDate` 与回退缺省值的 `validated` 对象后，传给 `viewModel.addItem / updateItem` 的仍是旧的 `currentForm` 字段；
+        - 输入框 `Modifier.onFocusChanged` 闭包直接捕获了旧的 `formState`，且在用户点击过数量或保质期输入框触发缺省值清空（变空白 `""`）后若未手动输入即切走焦点（如打开生产日期选择弹窗），空白字符串未在失焦或提交时回退到缺省值，导致校验失败；加之错误提示框位于滚动容器顶部被滚出可视区，表现为点击确认无反应。
+2. **采取了什么技术方案？**
+   - 在 [`MainScreen.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/MainScreen.kt) 的 `AddEditItemDialog` 中：
+     - 将「商品数量」与「购买金额」放入同一 `Row`（各占 `Modifier.weight(1f)`）并列显示，并将错误提示横幅固定在滚动区上方；
+     - 使用 `rememberUpdatedState` 包装 `formState` 与 `onFormChange`，防止日期选择弹窗关闭重获焦点时 `onFocusChanged` 读取过期闭包状态；
+     - 在 `onConfirm` 中严格使用 `validated` 对象的归一化字段（`validated.expirationDate`、`validated.quantity`、`validated.category`）调用 `viewModel.addItem / updateItem`。
+   - 在 [`ItemFormState`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/main/kotlin/com/example/mylist/ui/main/AdaptiveLayoutConfig.kt) 中新增 `hasEditedQuantity`、`hasEditedShelfLife` 标记与 `onCategoryBlur()`、`onQuantityBlur()`、`onShelfLifeBlur()` 失焦回退，并在 `validate()` 中对未曾手动编辑过的空白缺省项自动回退为 `"1"` / `"7"`。
+3. **结果如何？**
+   - 在 [`ExpirationCalculatorTest.kt`](file:///c:/Users/regal/.gemini/antigravity/scratch/mylist/app/src/test/kotlin/com/example/mylist/domain/ExpirationCalculatorTest.kt) 中新增端到端提交测试与焦点未输入回退边界测试，全工程 91 项单元测试全部通过。
+

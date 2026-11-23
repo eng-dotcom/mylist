@@ -52,6 +52,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -140,27 +141,31 @@ fun MainScreen(
         if (validated.errorMessage != null) {
           activeFormState = validated
         } else {
-          val success = if (currentForm.isEditMode) {
+          val success = if (validated.isEditMode) {
             viewModel.updateItem(
-              id = currentForm.editingItemId!!,
-              rawName = currentForm.name,
-              rawCategory = currentForm.category,
-              rawQuantity = currentForm.quantity,
-              rawAmount = currentForm.amount,
-              expirationDate = currentForm.expirationDate,
-              createdAtEpochMillis = currentForm.createdAtEpochMillis ?: System.currentTimeMillis()
+              id = validated.editingItemId!!,
+              rawName = validated.name,
+              rawCategory = validated.category,
+              rawQuantity = validated.quantity,
+              rawAmount = validated.amount,
+              expirationDate = validated.expirationDate,
+              createdAtEpochMillis = validated.createdAtEpochMillis ?: System.currentTimeMillis()
             )
           } else {
             viewModel.addItem(
-              rawName = currentForm.name,
-              rawCategory = currentForm.category,
-              rawQuantity = currentForm.quantity,
-              rawAmount = currentForm.amount,
-              expirationDate = currentForm.expirationDate
+              rawName = validated.name,
+              rawCategory = validated.category,
+              rawQuantity = validated.quantity,
+              rawAmount = validated.amount,
+              expirationDate = validated.expirationDate
             )
           }
           if (success) {
             activeFormState = null
+          } else {
+            activeFormState = validated.copy(
+              errorMessage = viewModel.uiState.value.errorMessage ?: "保存失败，请检查输入"
+            )
           }
         }
       }
@@ -1014,6 +1019,8 @@ fun AddEditItemDialog(
   var showExpirationDatePicker by remember { mutableStateOf(false) }
   var showProductionDatePicker by remember { mutableStateOf(false) }
   var categoryDropdownExpanded by remember { mutableStateOf(false) }
+  val latestFormState by rememberUpdatedState(formState)
+  val latestOnFormChange by rememberUpdatedState(onFormChange)
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -1025,11 +1032,10 @@ fun AddEditItemDialog(
     },
     text = {
       Column(
-        modifier = Modifier
-          .fillMaxWidth()
-          .verticalScroll(rememberScrollState()),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
+        // 错误提示横幅固定在滚动区上方，确保任何时候都清晰可见
         if (formState.errorMessage != null) {
           Surface(
             color = MaterialTheme.colorScheme.errorContainer,
@@ -1040,258 +1046,72 @@ fun AddEditItemDialog(
               text = formState.errorMessage,
               color = MaterialTheme.colorScheme.onErrorContainer,
               style = MaterialTheme.typography.bodySmall,
+              fontWeight = FontWeight.SemiBold,
               modifier = Modifier.padding(10.dp)
             )
           }
         }
 
-        OutlinedTextField(
-          value = formState.name,
-          onValueChange = { onFormChange(formState.copy(name = it, errorMessage = null)) },
-          label = { Text("商品名称 *") },
-          placeholder = { Text("例如：鲜牛奶、全麦面包") },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        // 分类输入与已有分类选择区
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-          Box(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-              value = formState.category,
-              onValueChange = { onFormChange(formState.updateCategory(it)) },
-              label = { Text("商品分类（可输入新分类或选择已有）") },
-              placeholder = { Text("例如：食品生鲜、饮品乳品") },
-              singleLine = true,
-              trailingIcon = {
-                TextButton(onClick = { categoryDropdownExpanded = true }) {
-                  Text("已有 ▾")
-                }
-              },
-              modifier = Modifier
-                .fillMaxWidth()
-                .onFocusChanged { focusState ->
-                  if (focusState.isFocused) {
-                    val updated = formState.onCategoryFocus()
-                    if (updated != formState) {
-                      onFormChange(updated)
-                    }
-                  }
-                }
-            )
-
-            DropdownMenu(
-              expanded = categoryDropdownExpanded,
-              onDismissRequest = { categoryDropdownExpanded = false }
-            ) {
-              availableCategories.forEach { existingCat ->
-                DropdownMenuItem(
-                  text = { Text(existingCat) },
-                  onClick = {
-                    onFormChange(formState.updateCategory(existingCat))
-                    categoryDropdownExpanded = false
-                  }
-                )
-              }
-            }
-          }
-
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Text(
-              text = "快捷选择：",
-              style = MaterialTheme.typography.labelSmall,
-              color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            availableCategories.forEach { categoryOption ->
-              val isSelected = formState.category.trim() == categoryOption
-              FilterChip(
-                selected = isSelected,
-                onClick = {
-                  onFormChange(formState.updateCategory(categoryOption))
-                },
-                label = { Text(categoryOption, style = MaterialTheme.typography.labelSmall) }
-              )
-            }
-          }
-        }
-
-        OutlinedTextField(
-          value = formState.quantity,
-          onValueChange = { onFormChange(formState.updateQuantity(it)) },
-          label = { Text("商品数量 (正整数) *") },
-          placeholder = { Text("例如：1") },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-          singleLine = true,
+        Column(
           modifier = Modifier
             .fillMaxWidth()
-            .onFocusChanged { focusState ->
-              if (focusState.isFocused) {
-                val updated = formState.onQuantityFocus()
-                if (updated != formState) {
-                  onFormChange(updated)
-                }
-              }
-            }
-        )
-
-        OutlinedTextField(
-          value = formState.amount,
-          onValueChange = { onFormChange(formState.copy(amount = it, errorMessage = null)) },
-          label = { Text("购买金额 (选填，可不填)") },
-          placeholder = { Text("例如：19.90，留空表示不填") },
-          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        // 过期日期录入方式切换：1) 直接输入过期日（保留原有方式） 2) 生产日期 + 保质期自动计算
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text(
-            text = "过期日期设置方式 *",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            .verticalScroll(rememberScrollState()),
+          verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+          OutlinedTextField(
+            value = formState.name,
+            onValueChange = { onFormChange(formState.copy(name = it, errorMessage = null)) },
+            label = { Text("商品名称 *") },
+            placeholder = { Text("例如：鲜牛奶、全麦面包") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
           )
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            ExpirationInputMode.entries.forEach { mode ->
-              val isSelected = formState.expirationInputMode == mode
-              FilterChip(
-                selected = isSelected,
-                onClick = { onFormChange(formState.switchExpirationInputMode(mode)) },
-                label = {
-                  Text(
-                    text = if (isSelected) "✓ ${mode.displayName}" else mode.displayName,
-                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                  )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                  selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                  selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-              )
-            }
-          }
 
-          if (formState.expirationInputMode == ExpirationInputMode.DIRECT_EXPIRATION) {
-            // 模式 1：直接输入/选择过期日期（保留原有方式）
-            Surface(
-              onClick = { showExpirationDatePicker = true },
-              shape = RoundedCornerShape(10.dp),
-              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Column {
-                  Text(
-                    text = "过期日期 (年 / 月 / 日) *",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                  Text(
-                    text = "${formState.expirationDate.year}年${formState.expirationDate.monthValue}月${formState.expirationDate.dayOfMonth}日 (${
-                      formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    })",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                  )
-                }
-                FilledTonalButton(onClick = { showExpirationDatePicker = true }) {
-                  Text("选择日期")
-                }
-              }
-            }
-          } else {
-            // 模式 2：输入生产日期 + 保质期，自动计算过期日期
-            Surface(
-              onClick = { showProductionDatePicker = true },
-              shape = RoundedCornerShape(10.dp),
-              color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-              ) {
-                Column {
-                  Text(
-                    text = "生产日期 (年 / 月 / 日) *",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                  Text(
-                    text = "${formState.productionDate.year}年${formState.productionDate.monthValue}月${formState.productionDate.dayOfMonth}日 (${
-                      formState.productionDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    })",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold
-                  )
-                }
-                FilledTonalButton(onClick = { showProductionDatePicker = true }) {
-                  Text("选择生产日")
-                }
-              }
-            }
-
-            // 保质期数值输入 + 单位（天 / 个月 / 年）选择
-            Row(
-              modifier = Modifier.fillMaxWidth(),
-              horizontalArrangement = Arrangement.spacedBy(8.dp),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
+          // 分类输入与已有分类选择区
+          Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(modifier = Modifier.fillMaxWidth()) {
               OutlinedTextField(
-                value = formState.shelfLifeValue,
-                onValueChange = { onFormChange(formState.updateShelfLifeValue(it)) },
-                label = { Text("保质期时长 *") },
-                placeholder = { Text("例如：7、30、6") },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                value = formState.category,
+                onValueChange = { onFormChange(formState.updateCategory(it)) },
+                label = { Text("商品分类（可输入新分类或选择已有）") },
+                placeholder = { Text("例如：食品生鲜、饮品乳品") },
                 singleLine = true,
+                trailingIcon = {
+                  TextButton(onClick = { categoryDropdownExpanded = true }) {
+                    Text("已有 ▾")
+                  }
+                },
                 modifier = Modifier
-                  .weight(1f)
+                  .fillMaxWidth()
                   .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                      val updated = formState.onShelfLifeFocus()
-                      if (updated != formState) {
-                        onFormChange(updated)
-                      }
+                    val current = latestFormState
+                    val updated = if (focusState.isFocused) {
+                      current.onCategoryFocus()
+                    } else {
+                      current.onCategoryBlur()
+                    }
+                    if (updated != current) {
+                      latestOnFormChange(updated)
                     }
                   }
               )
 
-              Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                ShelfLifeUnit.entries.forEach { unit ->
-                  val isSelectedUnit = formState.shelfLifeUnit == unit
-                  FilterChip(
-                    selected = isSelectedUnit,
-                    onClick = { onFormChange(formState.updateShelfLifeUnit(unit)) },
-                    label = {
-                      Text(
-                        text = unit.displayName,
-                        fontWeight = if (isSelectedUnit) FontWeight.Bold else FontWeight.Normal
-                      )
+              DropdownMenu(
+                expanded = categoryDropdownExpanded,
+                onDismissRequest = { categoryDropdownExpanded = false }
+              ) {
+                availableCategories.forEach { existingCat ->
+                  DropdownMenuItem(
+                    text = { Text(existingCat) },
+                    onClick = {
+                      onFormChange(formState.updateCategory(existingCat))
+                      categoryDropdownExpanded = false
                     }
                   )
                 }
               }
             }
 
-            // 常用保质期快捷选择标签
             Row(
               modifier = Modifier
                 .fillMaxWidth()
@@ -1300,49 +1120,259 @@ fun AddEditItemDialog(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Text(
-                text = "常用保质期：",
+                text = "快捷选择：",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
               )
-              ExpirationCalculator.COMMON_PRESETS.forEach { preset ->
-                val isPresetSelected =
-                  formState.shelfLifeValue.trim() == preset.value.toString() &&
-                    formState.shelfLifeUnit == preset.unit
+              availableCategories.forEach { categoryOption ->
+                val isSelected = formState.category.trim() == categoryOption
                 FilterChip(
-                  selected = isPresetSelected,
+                  selected = isSelected,
                   onClick = {
-                    onFormChange(formState.applyShelfLifePreset(preset.value, preset.unit))
+                    onFormChange(formState.updateCategory(categoryOption))
                   },
-                  label = { Text(preset.label, style = MaterialTheme.typography.labelSmall) }
+                  label = { Text(categoryOption, style = MaterialTheme.typography.labelSmall) }
+                )
+              }
+            }
+          }
+
+          // 商品数量与购买金额同行并列显示，使下方日期与保质期区域上提
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.Top
+          ) {
+            OutlinedTextField(
+              value = formState.quantity,
+              onValueChange = { onFormChange(formState.updateQuantity(it)) },
+              label = { Text("商品数量 *") },
+              placeholder = { Text("正整数，如 1") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+              singleLine = true,
+              modifier = Modifier
+                .weight(1f)
+                .onFocusChanged { focusState ->
+                  val current = latestFormState
+                  val updated = if (focusState.isFocused) {
+                    current.onQuantityFocus()
+                  } else {
+                    current.onQuantityBlur()
+                  }
+                  if (updated != current) {
+                    latestOnFormChange(updated)
+                  }
+                }
+            )
+
+            OutlinedTextField(
+              value = formState.amount,
+              onValueChange = { onFormChange(formState.copy(amount = it, errorMessage = null)) },
+              label = { Text("购买金额 (选填)") },
+              placeholder = { Text("如 19.90") },
+              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+              singleLine = true,
+              modifier = Modifier.weight(1f)
+            )
+          }
+
+          // 过期日期录入方式切换：1) 直接输入过期日（保留原有方式） 2) 生产日期 + 保质期自动计算
+          Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+              text = "过期日期设置方式 *",
+              style = MaterialTheme.typography.labelMedium,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              ExpirationInputMode.entries.forEach { mode ->
+                val isSelected = formState.expirationInputMode == mode
+                FilterChip(
+                  selected = isSelected,
+                  onClick = { onFormChange(formState.switchExpirationInputMode(mode)) },
+                  label = {
+                    Text(
+                      text = if (isSelected) "✓ ${mode.displayName}" else mode.displayName,
+                      fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                  },
+                  colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                  )
                 )
               }
             }
 
-            // 自动计算得出的过期日期实时展示栏
-            Surface(
-              shape = RoundedCornerShape(10.dp),
-              color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
-              modifier = Modifier.fillMaxWidth()
-            ) {
-              Column(
+            if (formState.expirationInputMode == ExpirationInputMode.DIRECT_EXPIRATION) {
+              // 模式 1：直接输入/选择过期日期（保留原有方式）
+              Surface(
+                onClick = { showExpirationDatePicker = true },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column {
+                    Text(
+                      text = "过期日期 (年 / 月 / 日) *",
+                      style = MaterialTheme.typography.labelMedium,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                      text = "${formState.expirationDate.year}年${formState.expirationDate.monthValue}月${formState.expirationDate.dayOfMonth}日 (${
+                        formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                      })",
+                      style = MaterialTheme.typography.titleMedium,
+                      fontWeight = FontWeight.SemiBold
+                    )
+                  }
+                  FilledTonalButton(onClick = { showExpirationDatePicker = true }) {
+                    Text("选择日期")
+                  }
+                }
+              }
+            } else {
+              // 模式 2：输入生产日期 + 保质期，自动计算过期日期
+              Surface(
+                onClick = { showProductionDatePicker = true },
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Row(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+                ) {
+                  Column {
+                    Text(
+                      text = "生产日期 (年 / 月 / 日) *",
+                      style = MaterialTheme.typography.labelMedium,
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                      text = "${formState.productionDate.year}年${formState.productionDate.monthValue}月${formState.productionDate.dayOfMonth}日 (${
+                        formState.productionDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                      })",
+                      style = MaterialTheme.typography.titleMedium,
+                      fontWeight = FontWeight.SemiBold
+                    )
+                  }
+                  FilledTonalButton(onClick = { showProductionDatePicker = true }) {
+                    Text("选择生产日")
+                  }
+                }
+              }
+
+              // 保质期数值输入 + 单位（天 / 个月 / 年）选择
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                OutlinedTextField(
+                  value = formState.shelfLifeValue,
+                  onValueChange = { onFormChange(formState.updateShelfLifeValue(it)) },
+                  label = { Text("保质期时长 *") },
+                  placeholder = { Text("例如：7、30、6") },
+                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                  singleLine = true,
+                  modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { focusState ->
+                      val current = latestFormState
+                      val updated = if (focusState.isFocused) {
+                        current.onShelfLifeFocus()
+                      } else {
+                        current.onShelfLifeBlur()
+                      }
+                      if (updated != current) {
+                        latestOnFormChange(updated)
+                      }
+                    }
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                  ShelfLifeUnit.entries.forEach { unit ->
+                    val isSelectedUnit = formState.shelfLifeUnit == unit
+                    FilterChip(
+                      selected = isSelectedUnit,
+                      onClick = { onFormChange(formState.updateShelfLifeUnit(unit)) },
+                      label = {
+                        Text(
+                          text = unit.displayName,
+                          fontWeight = if (isSelectedUnit) FontWeight.Bold else FontWeight.Normal
+                        )
+                      }
+                    )
+                  }
+                }
+              }
+
+              // 常用保质期快捷选择标签
+              Row(
                 modifier = Modifier
                   .fillMaxWidth()
-                  .padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
+                  .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
               ) {
                 Text(
-                  text = "自动计算过期日期",
+                  text = "常用保质期：",
                   style = MaterialTheme.typography.labelSmall,
-                  color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Text(
-                  text = "${formState.expirationDate.year}年${formState.expirationDate.monthValue}月${formState.expirationDate.dayOfMonth}日 (${
-                    formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                  })",
-                  style = MaterialTheme.typography.titleMedium,
-                  fontWeight = FontWeight.Bold,
-                  color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                ExpirationCalculator.COMMON_PRESETS.forEach { preset ->
+                  val isPresetSelected =
+                    formState.shelfLifeValue.trim() == preset.value.toString() &&
+                      formState.shelfLifeUnit == preset.unit
+                  FilterChip(
+                    selected = isPresetSelected,
+                    onClick = {
+                      onFormChange(formState.applyShelfLifePreset(preset.value, preset.unit))
+                    },
+                    label = { Text(preset.label, style = MaterialTheme.typography.labelSmall) }
+                  )
+                }
+              }
+
+              // 自动计算得出的过期日期实时展示栏
+              Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+                modifier = Modifier.fillMaxWidth()
+              ) {
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                  verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                  Text(
+                    text = "自动计算过期日期",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.85f)
+                  )
+                  Text(
+                    text = "${formState.expirationDate.year}年${formState.expirationDate.monthValue}月${formState.expirationDate.dayOfMonth}日 (${
+                      formState.expirationDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    })",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                  )
+                }
               }
             }
           }

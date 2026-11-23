@@ -1,14 +1,25 @@
 package com.example.mylist.domain
 
+import com.example.mylist.data.local.InMemoryPurchasedItemDao
+import com.example.mylist.data.repository.DefaultPurchasedItemRepository
 import com.example.mylist.domain.model.ExpirationCalculator
 import com.example.mylist.domain.model.ExpirationInputMode
 import com.example.mylist.domain.model.ShelfLifeUnit
 import com.example.mylist.ui.main.ItemFormState
+import com.example.mylist.ui.main.PurchasedItemViewModel
 import java.time.LocalDate
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -26,9 +37,21 @@ import org.junit.Test
  *    - 闰年 2月29日 + 1年 -> 平年 2月28日；
  *    - 从【生产日期 + 保质期】计算得出过期日期后切换回【直接输入过期日】，保留已算出的过期日期并支持继续手动直接修改。
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ExpirationCalculatorTest {
 
+  private val testDispatcher = UnconfinedTestDispatcher()
   private val baseProductionDate = LocalDate.of(2026, 11, 1)
+
+  @Before
+  fun setUp() {
+    Dispatchers.setMain(testDispatcher)
+  }
+
+  @After
+  fun tearDown() {
+    Dispatchers.resetMain()
+  }
 
   // ==================== 1. 正向路径测试 ====================
 
@@ -138,17 +161,91 @@ class ExpirationCalculatorTest {
   }
 
   @Test
-  fun `ItemFormState validate fails with error message when shelfLifeValue is invalid in production mode`() {
+  fun `ItemFormState validate fails with error message when shelfLifeValue is explicitly cleared after edit in production mode`() {
     val invalidShelfLifeForm = ItemFormState.forNewItem(
       defaultDate = LocalDate.of(2026, 11, 26),
       defaultProductionDate = LocalDate.of(2026, 11, 19)
     )
       .copy(name = "面包")
       .switchExpirationInputMode(ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE)
-      .onShelfLifeFocus() // 清空为 "" 后未输入保质期
+      .onShelfLifeFocus()
+      .updateShelfLifeValue("") // 用户主动输入/清空为空字符串
 
     val validated = invalidShelfLifeForm.validate()
     assertEquals("请输入保质期时长", validated.errorMessage)
+  }
+
+  @Test
+  fun `submitting productionDate and shelfLife through validated formState to ViewModel succeeds end-to-end`() = runTest {
+    val today = LocalDate.of(2026, 11, 23)
+    val repository = DefaultPurchasedItemRepository(InMemoryPurchasedItemDao())
+    val viewModel = PurchasedItemViewModel(repository = repository, todayProvider = { today })
+
+    // 模拟用户打开新增弹窗：聚焦过数量框（未改数量即移开焦点），切换到生产日期+保质期模式，选择生产日期并输入保质期
+    val form = ItemFormState.forNewItem(
+      defaultDate = today.plusDays(7),
+      defaultProductionDate = today
+    )
+      .copy(name = "鲜牛奶")
+      .onQuantityFocus() // 聚焦时清空为 ""
+      .onQuantityBlur()  // 移开焦点未输入时自动恢复缺省 "1"
+      .switchExpirationInputMode(ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE)
+      .updateProductionDate(LocalDate.of(2026, 11, 20))
+      .onShelfLifeFocus()
+      .updateShelfLifeValue("15")
+      .updateShelfLifeUnit(ShelfLifeUnit.DAYS)
+
+    val validated = form.validate()
+    assertNull(validated.errorMessage)
+    assertEquals("1", validated.quantity)
+    assertEquals(LocalDate.of(2026, 12, 5), validated.expirationDate)
+
+    val added = viewModel.addItem(
+      rawName = validated.name,
+      rawCategory = validated.category,
+      rawQuantity = validated.quantity,
+      rawAmount = validated.amount,
+      expirationDate = validated.expirationDate
+    )
+    assertTrue(added)
+    assertEquals(1, viewModel.uiState.value.items.size)
+    val saved = viewModel.uiState.value.items.first()
+    assertEquals("鲜牛奶", saved.name)
+    assertEquals(1, saved.quantity)
+    assertEquals(LocalDate.of(2026, 12, 5), saved.expirationDate)
+  }
+
+  @Test
+  fun `boundary - focusing quantity or shelfLife without typing still allows direct submit by falling back to defaults`() = runTest {
+    val today = LocalDate.of(2026, 11, 23)
+    val repository = DefaultPurchasedItemRepository(InMemoryPurchasedItemDao())
+    val viewModel = PurchasedItemViewModel(repository = repository, todayProvider = { today })
+
+    // 边界：用户点击了保质期输入框（触发 onShelfLifeFocus 变空白），但未输入字符就直接点击“确认添加”
+    val form = ItemFormState.forNewItem(
+      defaultDate = today.plusDays(7),
+      defaultProductionDate = LocalDate.of(2026, 11, 10)
+    )
+      .copy(name = "日配酸奶")
+      .onQuantityFocus()
+      .switchExpirationInputMode(ExpirationInputMode.PRODUCTION_AND_SHELF_LIFE)
+      .onShelfLifeFocus()
+
+    val validated = form.validate()
+    assertNull(validated.errorMessage)
+    assertEquals("1", validated.quantity)
+    assertEquals("7", validated.shelfLifeValue)
+    assertEquals(LocalDate.of(2026, 11, 17), validated.expirationDate)
+
+    val added = viewModel.addItem(
+      rawName = validated.name,
+      rawCategory = validated.category,
+      rawQuantity = validated.quantity,
+      rawAmount = validated.amount,
+      expirationDate = validated.expirationDate
+    )
+    assertTrue(added)
+    assertEquals(LocalDate.of(2026, 11, 17), viewModel.uiState.value.items.first().expirationDate)
   }
 
   // ==================== 3. 边界条件测试 ====================
